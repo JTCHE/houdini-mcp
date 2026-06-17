@@ -67,37 +67,114 @@ def delete_node(path):
     return {"deleted": node_path, "name": node_name}
 
 
-def get_node_info(path):
-    """Returns detailed information about a single node."""
+def _parm_default_value(parm):
+    """Return the default scalar value for one parm component, or None on failure."""
+    try:
+        defaults = parm.parmTemplate().defaultValue()
+        if isinstance(defaults, (tuple, list)):
+            idx = parm.componentIndex()
+            return defaults[idx] if idx < len(defaults) else (defaults[0] if defaults else None)
+        return defaults
+    except Exception:
+        return None
+
+
+def _menu_label(template, val):
+    """Map a menu parm's value to its label, or None if the parm has no menu.
+
+    Handles both integer-indexed menus (Int/Menu templates, eval -> index) and
+    string-token menus (String templates, eval -> token).
+    """
+    try:
+        labels = template.menuLabels()
+        if not labels:
+            return None
+        if isinstance(val, bool):
+            return None
+        if isinstance(val, (int, float)):
+            idx = int(val)
+            if 0 <= idx < len(labels):
+                return labels[idx]
+            return None
+        if isinstance(val, str):
+            items = template.menuItems()
+            if items and val in items:
+                return labels[items.index(val)]
+    except Exception:
+        pass
+    return None
+
+
+def get_node_info(path, include_all_parms=False):
+    """Returns detailed information about a node.
+
+    By default only changed parameters are returned (token-lean).
+    Pass include_all_parms=True for the full parameter table.
+    """
     node = hou.node(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
 
+    node_type = node.type()
+    color = node.color()
+
     node_info = {
         "name": node.name(),
         "path": node.path(),
-        "type": node.type().name(),
-        "category": node.type().category().name(),
+        "type": node_type.name(),
+        "type_label": node_type.description(),
+        "category": node_type.category().name(),
         "position": [node.position()[0], node.position()[1]],
-        "color": list(node.color()) if node.color() else None,
+        "color": list(color.rgb()),
         "is_bypassed": node.isBypassed(),
         "is_displayed": getattr(node, "isDisplayFlagSet", lambda: None)(),
         "is_rendered": getattr(node, "isRenderFlagSet", lambda: None)(),
-        "parameters": [],
         "inputs": [],
-        "outputs": []
+        "outputs": [],
     }
 
-    for i, parm in enumerate(node.parms()):
-        if i >= 20:
-            break
-        node_info["parameters"].append({
-            "name": parm.name(),
-            "label": parm.label(),
-            "value": str(parm.eval()),
-            "raw_value": parm.rawValue(),
-            "type": parm.parmTemplate().type().name()
-        })
+    changed = []
+    unchanged_count = 0
+
+    for parm in node.parms():
+        template = parm.parmTemplate()
+        ptype = template.type()
+        is_at_default = parm.isAtDefault()
+
+        if is_at_default and not include_all_parms:
+            unchanged_count += 1
+            continue
+
+        try:
+            val = parm.eval()
+        except Exception:
+            val = parm.rawValue()
+
+        entry = {
+            "id": parm.name(),
+            "label": template.label(),
+            "value": str(val),
+            "type": ptype.name(),
+        }
+
+        # Resolve a human-readable label for menu parms (returns None if not a menu)
+        lbl = _menu_label(template, val)
+        if lbl is not None:
+            entry["value_label"] = lbl
+
+        if not is_at_default:
+            default = _parm_default_value(parm)
+            if default is not None:
+                entry["default"] = str(default)
+                dlbl = _menu_label(template, default)
+                if dlbl is not None:
+                    entry["default_label"] = dlbl
+
+        changed.append(entry)
+
+    node_info["changed_parameters"] = changed
+    node_info["parameter_count"] = len(node.parms())
+    node_info["unchanged_count"] = unchanged_count
 
     for i, in_node in enumerate(node.inputs()):
         if in_node:
@@ -105,20 +182,47 @@ def get_node_info(path):
                 "index": i,
                 "name": in_node.name(),
                 "path": in_node.path(),
-                "type": in_node.type().name()
+                "type": in_node.type().name(),
             })
 
-    for i, out_conn in enumerate(node.outputConnections()):
+    for out_conn in node.outputConnections():
         out_node = out_conn.outputNode()
         node_info["outputs"].append({
-            "index": i,
             "name": out_node.name(),
             "path": out_node.path(),
             "type": out_node.type().name(),
-            "input_index": out_conn.inputIndex()
+            "input_index": out_conn.inputIndex(),
         })
 
     return node_info
+
+
+def get_changed_parms(path):
+    """Return only changed parameters for a node — the cheapest 'what did I tweak' call."""
+    info = get_node_info(path)
+    return {
+        "path": path,
+        "changed_parameters": info["changed_parameters"],
+        "parameter_count": info["parameter_count"],
+        "unchanged_count": info["unchanged_count"],
+    }
+
+
+def get_node_doc_meta(path):
+    """Return type/category/defaultHelpUrl for a node so the bridge can fetch its docs."""
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    node_type = node.type()
+    try:
+        help_url = node_type.defaultHelpUrl()
+    except Exception:
+        help_url = None
+    return {
+        "type_name": node_type.name(),
+        "category": node_type.category().name(),
+        "default_help_url": help_url,
+    }
 
 
 def connect_nodes(src_path, dst_path, dst_input_index=0, src_output_index=0):

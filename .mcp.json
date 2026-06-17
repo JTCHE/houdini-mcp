@@ -2,7 +2,10 @@
   "mcpServers": {
     "houdini": {
       "command": "uv",
-      "args": ["run", "python", "houdini_mcp_server.py"]
+      "args": ["run", "python", "houdini_mcp_server.py"],
+      "env": {
+        "HOUDINIMCP_PORT": "9877"
+      }
     }
   }
 }

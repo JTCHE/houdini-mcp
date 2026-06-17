@@ -18,6 +18,7 @@ from .handlers.nodes import (
     layout_children, set_node_color, set_expression, find_error_nodes,
     copy_node, move_node, rename_node, list_children, find_nodes,
     list_node_types, connect_nodes_batch, reorder_inputs,
+    get_changed_parms, get_node_doc_meta,
 )
 from .handlers.context import (
     get_network_overview, get_cook_chain, explain_node, get_scene_summary,
@@ -92,7 +93,7 @@ EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 2)
 EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 
-DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9876))
+DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9877))
 
 
 class HoudiniMCPServer:
@@ -300,6 +301,8 @@ class HoudiniMCPServer:
             "list_node_types": list_node_types,
             "connect_nodes_batch": connect_nodes_batch,
             "reorder_inputs": reorder_inputs,
+            "get_changed_parms": get_changed_parms,
+            "get_node_doc_meta": get_node_doc_meta,
             # Geometry expanded
             "get_points": get_points,
             "get_prims": get_prims,

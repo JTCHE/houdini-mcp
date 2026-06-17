@@ -17,7 +17,7 @@ def get_geo_summary(node_path):
     return {
         "num_points": len(geo.points()),
         "num_prims": len(geo.prims()),
-        "num_vertices": len(geo.vertices()),
+        "num_vertices": geo.intrinsicValue("vertexcount"),
         "bounding_box": {
             "min": list(bbox.minvec()),
             "max": list(bbox.maxvec()),
@@ -244,7 +244,7 @@ def geo_export(node_path, format="obj", output=None):
         "format": format,
         "num_points": len(geo.points()),
         "num_prims": len(geo.prims()),
-        "num_vertices": len(geo.vertices()),
+        "num_vertices": geo.intrinsicValue("vertexcount"),
         "bounding_box": {
             "min": list(bbox.minvec()),
             "max": list(bbox.maxvec()),

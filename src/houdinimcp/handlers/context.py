@@ -58,7 +58,7 @@ def explain_node(path):
             continue
         parms.append({
             "name": parm.name(),
-            "label": parm.label(),
+            "label": parm.parmTemplate().label(),
             "value": str(parm.eval()),
         })
     inputs = []

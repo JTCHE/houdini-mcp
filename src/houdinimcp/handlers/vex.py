@@ -55,6 +55,23 @@ def create_vex_expression(parent_path, attrib_name, expression, run_over="Points
 
 
 def validate_vex(code):
-    """Validate VEX code syntax (basic check via hou.text.vexSyntaxCheck)."""
-    result = hou.text.vexSyntaxCheck(code)
-    return {"valid": result == "", "errors": result if result else None}
+    """Validate VEX by compiling it in a throwaway wrangle and reading cook errors.
+
+    HOM has no direct VEX-string syntax checker, so we cook a temporary
+    attribwrangle (fed one point) and report any compile/cook errors.
+    """
+    tmp = hou.node("/obj").createNode("geo", node_name="__vex_validate_tmp")
+    try:
+        add = tmp.createNode("add")
+        add.parm("points").set(1)
+        wr = tmp.createNode("attribwrangle")
+        wr.parm("snippet").set(code)
+        wr.setInput(0, add)
+        try:
+            wr.cook(force=True)
+        except hou.OperationFailed:
+            pass  # cook errors are captured via wr.errors() below
+        errors = list(wr.errors())
+        return {"valid": len(errors) == 0, "errors": errors or None}
+    finally:
+        tmp.destroy()

@@ -13,7 +13,7 @@ def get_parameter(node_path, parm_name):
     template = parm.parmTemplate()
     result = {
         "name": parm.name(),
-        "label": parm.label(),
+        "label": parm.parmTemplate().label(),
         "value": parm.eval(),
         "raw_value": parm.rawValue(),
         "type": template.type().name(),
@@ -66,7 +66,7 @@ def get_parameter_schema(node_path):
         template = parm.parmTemplate()
         info = {
             "name": parm.name(),
-            "label": parm.label(),
+            "label": template.label(),
             "type": template.type().name(),
             "is_at_default": parm.isAtDefault(),
         }

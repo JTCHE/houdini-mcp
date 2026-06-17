@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP, Context
 import asyncio
 
-HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", 9876))
+HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", 9877))
 HEADLESS_DISABLED = os.getenv("HOUDINIMCP_NO_HEADLESS", "").strip() in ("1", "true", "yes")
 
 logging.basicConfig(level=logging.INFO)
@@ -457,10 +457,16 @@ def render_single_view(ctx: Context,
                        rotation: List[float] = [0, 90, 0],
                        render_path: str = None,
                        render_engine: str = "opengl",
-                       karma_engine: str = "cpu") -> str:
+                       karma_engine: str = "cpu",
+                       allow_dangerous: bool = False) -> str:
     """
     Render a single view inside Houdini and return the rendered image path.
+    WARNING: known to crash the MCP connection (WinError 10054). Pass allow_dangerous=True to proceed.
     """
+    if not allow_dangerous:
+        return ("DANGEROUS: render_single_view executes inside Houdini and crashes the MCP "
+                "connection (WinError 10054). Use capture_screenshot for a safe viewport grab. "
+                "Pass allow_dangerous=True to override.")
     try:
         conn = get_houdini_connection()
         response = conn.send_command("render_single_view", {
@@ -488,10 +494,15 @@ def render_single_view(ctx: Context,
 def render_quad_views(ctx: Context,
                       render_path: str = None,
                       render_engine: str = "opengl",
-                      karma_engine: str = "cpu") -> str:
+                      karma_engine: str = "cpu",
+                      allow_dangerous: bool = False) -> str:
     """
     Render 4 canonical views from Houdini and return the image paths.
+    WARNING: known to crash the MCP connection (WinError 10054). Pass allow_dangerous=True to proceed.
     """
+    if not allow_dangerous:
+        return ("DANGEROUS: render_quad_views executes inside Houdini and crashes the MCP "
+                "connection (WinError 10054). Pass allow_dangerous=True to override.")
     try:
         conn = get_houdini_connection()
         response = conn.send_command("render_quad_view", {
@@ -523,10 +534,15 @@ def render_specific_camera(ctx: Context,
                            camera_path: str,
                            render_path: str = None,
                            render_engine: str = "opengl",
-                           karma_engine: str = "cpu") -> str:
+                           karma_engine: str = "cpu",
+                           allow_dangerous: bool = False) -> str:
     """
     Render from a specific camera path in the Houdini scene.
+    WARNING: known to crash the MCP connection (WinError 10054). Pass allow_dangerous=True to proceed.
     """
+    if not allow_dangerous:
+        return ("DANGEROUS: render_specific_camera executes inside Houdini and crashes the MCP "
+                "connection (WinError 10054). Pass allow_dangerous=True to override.")
     try:
         conn = get_houdini_connection()
         response = conn.send_command("render_specific_camera", {
@@ -1123,8 +1139,13 @@ def geo_export(ctx: Context, node_path: str, format: str = "obj",
 
 @mcp.tool()
 def render_flipbook(ctx: Context, frame_range: List[float] = None,
-                    output: str = None, resolution: List[int] = None) -> str:
-    """Render a flipbook sequence from the viewport."""
+                    output: str = None, resolution: List[int] = None,
+                    allow_dangerous: bool = False) -> str:
+    """Render a flipbook sequence from the viewport.
+    WARNING: known to crash the MCP connection (WinError 10054). Pass allow_dangerous=True to proceed."""
+    if not allow_dangerous:
+        return ("DANGEROUS: render_flipbook executes inside Houdini and crashes the MCP "
+                "connection (WinError 10054). Pass allow_dangerous=True to override.")
     params = {}
     if frame_range is not None:
         params["frame_range"] = frame_range
@@ -1267,8 +1288,13 @@ def create_render_node(ctx: Context, render_type: str = "opengl",
     return _send_tool_command("create_render_node", params)
 
 @mcp.tool()
-def start_render(ctx: Context, path: str, frame_range: List[float] = None) -> str:
-    """Start a render from a ROP node."""
+def start_render(ctx: Context, path: str, frame_range: List[float] = None,
+                 allow_dangerous: bool = False) -> str:
+    """Start a render from a ROP node.
+    WARNING: known to crash the MCP connection (WinError 10054). Pass allow_dangerous=True to proceed."""
+    if not allow_dangerous:
+        return ("DANGEROUS: start_render executes inside Houdini and crashes the MCP "
+                "connection (WinError 10054). Pass allow_dangerous=True to override.")
     params = {"path": path}
     if frame_range is not None:
         params["frame_range"] = frame_range
@@ -1614,10 +1640,10 @@ def subscribe_houdini_events(ctx: Context, types: List[str] = None) -> str:
 
 @mcp.tool()
 def search_docs(ctx: Context, query: str, top_k: int = 5) -> str:
-    """Search Houdini documentation offline using BM25.
-    Returns ranked results with path, title, preview, and relevance score.
-    Does NOT require a Houdini connection."""
-    from houdini_rag import search_docs as _search
+    """Search Houdini documentation via online proxy (houdinimd.jchd.me).
+    Ranks the ~10 500 doc paths by token overlap — no content download.
+    Returns {path, title, url, score}. Does NOT require a Houdini connection."""
+    from houdini_docs import search_docs as _search
     results = _search(query, top_k)
     if isinstance(results, dict) and "error" in results:
         return f"Error: {results['error']}"
@@ -1625,13 +1651,47 @@ def search_docs(ctx: Context, query: str, top_k: int = 5) -> str:
 
 @mcp.tool()
 def get_doc(ctx: Context, path: str) -> str:
-    """Get the full content of a Houdini documentation page by its relative path
-    (as returned by search_docs). Does NOT require a Houdini connection."""
-    from houdini_rag import get_doc_content
+    """Fetch the full markdown of a Houdini doc page, e.g. 'nodes/sop/attribwrangle'.
+    Fetches live from houdinimd.jchd.me. Does NOT require a Houdini connection."""
+    from houdini_docs import get_doc_content
     result = get_doc_content(path)
     if "error" in result:
         return f"Error: {result['error']}"
-    return json.dumps(result, indent=2)
+    return result["content"]
+
+@mcp.tool()
+def get_node_doc(ctx: Context, path: str) -> str:
+    """Fetch the documentation page for a scene node in one call.
+    Queries the Houdini plugin for the node's type/category/helpUrl, then
+    retrieves the corresponding markdown from houdinimd.jchd.me.
+    Requires a Houdini connection."""
+    from houdini_docs import parse_help_url, resolve_node_doc, get_doc_content
+    meta_resp = _send_tool_command("get_node_doc_meta", {"path": path})
+    try:
+        meta = json.loads(meta_resp)
+    except Exception:
+        return f"Error fetching node meta: {meta_resp}"
+
+    doc_path = (
+        parse_help_url(meta.get("default_help_url"))
+        or resolve_node_doc(meta.get("type_name", ""), meta.get("category", ""))
+    )
+    result = get_doc_content(doc_path)
+    if "error" in result:
+        # Try search fallback
+        from houdini_docs import search_docs
+        hits = search_docs(meta.get("type_name", ""), top_k=1)
+        if hits and not isinstance(hits, dict):
+            result = get_doc_content(hits[0]["path"])
+    if "error" in result:
+        return f"Error: {result['error']}"
+    return result["content"]
+
+@mcp.tool()
+def get_changed_parms(ctx: Context, path: str) -> str:
+    """Return only the changed parameters for a node — the cheapest 'what did I tweak' call.
+    Requires a Houdini connection."""
+    return _send_tool_command("get_changed_parms", {"path": path})
 
 
 _RENDER_PROCESS_NAMES = ("husk", "mantra-bin")
