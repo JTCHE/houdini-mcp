@@ -4,7 +4,7 @@ houdini_mcp_server.py
 
 This is the "bridge" or "driver" script that Claude will run via `uv run`.
 It uses the MCP library (fastmcp) to communicate with Claude over stdio,
-and relays each command to the local Houdini plugin on port 9876.
+and relays each command to the local Houdini plugin over TCP (see HOUDINI_PORT).
 """
 import sys
 import os
@@ -342,12 +342,14 @@ IMPORTANT — Houdini MCP Connection Rules:
    `monitor_render` to poll for `husk` / `mantra-bin` processes and check if
    the output file exists. No Houdini connection needed.
 
-9. **Document non-trivial discoveries.** If you encounter a silent failure,
-   undocumented API quirk, or required workaround while using this MCP, read
-   `BEST_PRACTICES.md` in the houdini-mcp repo root first to check it isn't
-   already covered, then add a brief entry under the appropriate context
-   section (COPs, SOPs, LOPs, etc.) and update the index. Keep entries short:
-   problem, symptom, fix. No essays.
+9. **Confirm the API before you call it.** Houdini changes method names and enum
+   members between releases. Use `search_docs` / `get_doc` for reference, and
+   `execute_houdini_code` with `dir()` to confirm a symbol exists in the running
+   session.
+
+10. **Expect silent failures.** A mismatched name or an active expression gives a
+   wrong result and no error. Read back what you set, and check `find_error_nodes`
+   before you report success.
 """)
 
 @asynccontextmanager

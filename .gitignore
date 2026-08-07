@@ -21,3 +21,7 @@ hip_parsed.json
 hda_parsed.json
 hip_patterns/
 hip_patterns_index.json
+
+# env files
+.env
+.env.*
