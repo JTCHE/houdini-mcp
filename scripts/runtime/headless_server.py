@@ -5,7 +5,7 @@ headless_server.py — Run the HoudiniMCP TCP server inside hython (no GUI).
 Launched automatically by the MCP bridge when no Houdini instance is detected.
 Can also be run manually:
 
-    hython scripts/headless_server.py
+    hython scripts/runtime/headless_server.py
 
 Environment variables:
     HOUDINIMCP_PORT    TCP port (default: 9876)

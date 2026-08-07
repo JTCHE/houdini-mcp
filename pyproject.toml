@@ -8,6 +8,11 @@ dependencies = [
     "mcp[cli]>=1.4.1",
 ]
 
+# The repository URL lives here. Everything that needs it reads it from here,
+# except the bootstrap scripts, which run before the repository exists.
+[project.urls]
+Repository = "https://github.com/JTCHE/houdini-mcp"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -6,14 +6,14 @@ Must be run with hython (Houdini's Python interpreter), not regular Python.
 Supports parallel extraction with --workers N.
 
 Usage:
-    hython scripts/extract_hdas.py                          # auto-detect $HFS
-    hython scripts/extract_hdas.py --hfs-dir /opt/hfs21.0
-    hython scripts/extract_hdas.py --output hda_parsed.json
-    hython scripts/extract_hdas.py --extra-dir ~/my_hdas
-    hython scripts/extract_hdas.py --workers 8              # parallel extraction
+    hython scripts/ingest/extract_hdas.py                          # auto-detect $HFS
+    hython scripts/ingest/extract_hdas.py --hfs-dir /opt/hfs21.0
+    hython scripts/ingest/extract_hdas.py --output hda_parsed.json
+    hython scripts/ingest/extract_hdas.py --extra-dir ~/my_hdas
+    hython scripts/ingest/extract_hdas.py --workers 8              # parallel extraction
 
     # Internal: worker mode (called by orchestrator, not by user)
-    hython scripts/extract_hdas.py --worker-chunk chunk.json --worker-out out.json
+    hython scripts/ingest/extract_hdas.py --worker-chunk chunk.json --worker-out out.json
 
 The output JSON has the same shape as hip_parsed.json:
     [{"source", "nodes", "connections", "sticky_notes", "netboxes"}, ...]

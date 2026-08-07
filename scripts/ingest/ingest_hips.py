@@ -3,12 +3,11 @@
 Houdini .hip ingest pipeline — discover, parse, extract, and index.
 
 Usage:
-    python scripts/ingest_hips.py discover                     # list .hip files
-    python scripts/ingest_hips.py parse                        # discover + parse all
-    python scripts/ingest_hips.py extract-hdas                 # extract HDA networks via hython
-    python scripts/ingest_hips.py extract                      # merge parsed data + extract patterns
-    python scripts/ingest_hips.py index                        # build combined BM25 index
-    python scripts/ingest_hips.py all                          # full pipeline (including HDAs)
+    python scripts/ingest/ingest_hips.py discover                     # list .hip files
+    python scripts/ingest/ingest_hips.py parse                        # discover + parse all
+    python scripts/ingest/ingest_hips.py extract-hdas                 # extract HDA networks via hython
+    python scripts/ingest/ingest_hips.py extract                      # merge parsed data + extract patterns
+    python scripts/ingest/ingest_hips.py all                          # full pipeline (including HDAs)
 
     Options for discover/parse/extract-hdas/extract/all:
         --hfs-dir /opt/hfs21.0          Explicit $HFS path
@@ -27,7 +26,7 @@ import time
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
 HIP_EXTENSIONS = {".hip", ".hipnc"}
 HDA_EXTENSIONS = {".hda", ".otl"}
@@ -326,26 +325,17 @@ def cmd_extract(args):
     print(f"Index:  {index_path}")
 
 
-def cmd_index(args):
-    """Handle the 'index' subcommand — build combined BM25 index."""
-    sys.path.insert(0, REPO_ROOT)
-    from houdini_rag import build_combined_index
-
-    index = build_combined_index()
-    print(f"Index built: {len(index.documents)} documents")
-
-
 def cmd_all(args):
     """Handle the 'all' subcommand — full pipeline including HDAs."""
     sys.path.insert(0, REPO_ROOT)
 
-    print("=== Step 1/5: Discover ===")
+    print("=== Step 1/4: Discover ===")
     cmd_discover(args)
 
-    print(f"\n=== Step 2/5: Parse .hip files ===")
+    print(f"\n=== Step 2/4: Parse .hip files ===")
     cmd_parse(args)
 
-    print(f"\n=== Step 3/5: Extract HDAs (hython) ===")
+    print(f"\n=== Step 3/4: Extract HDAs (hython) ===")
     hfs_path = find_houdini_install(hfs_dir=args.hfs_dir)
     hython = _find_hython(hfs_path) if hfs_path else None
     if hython:
@@ -353,11 +343,8 @@ def cmd_all(args):
     else:
         print("Skipping: hython not found (HDA extraction requires Houdini)")
 
-    print(f"\n=== Step 4/5: Extract patterns ===")
+    print(f"\n=== Step 4/4: Extract patterns ===")
     cmd_extract(args)
-
-    print(f"\n=== Step 5/5: Index ===")
-    cmd_index(args)
 
     print(f"\n{'='*60}")
     print("Pipeline complete.")
@@ -394,8 +381,6 @@ def main():
     _add_common_args(extract_parser)
     extract_parser.add_argument("--output", default=None, help="Output JSON path (default: hip_parsed.json)")
 
-    subparsers.add_parser("index", help="Build combined BM25 index from docs + patterns")
-
     all_parser = subparsers.add_parser("all", help="Run full pipeline including HDAs")
     _add_common_args(all_parser)
     all_parser.add_argument("--output", default=None, help="Output JSON path (default: hip_parsed.json)")
@@ -408,7 +393,6 @@ def main():
         "parse": cmd_parse,
         "extract-hdas": cmd_extract_hdas,
         "extract": cmd_extract,
-        "index": cmd_index,
         "all": cmd_all,
     }
     handler = commands.get(args.command)

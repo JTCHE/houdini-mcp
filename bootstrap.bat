@@ -1,273 +1,61 @@
 @echo off
 setlocal enabledelayedexpansion
-REM bootstrap.bat — One-command setup for HoudiniMCP (Windows)
+REM bootstrap.bat — One-command setup for HoudiniMCP (Windows).
 REM
-REM Usage (fresh install, PowerShell):
-REM   powershell -c "irm https://raw.githubusercontent.com/kleer001/houdini-mcp/main/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
+REM Gets the repository and uv onto the machine, then hands over to the
+REM installer, which does the Houdini plugin and the MCP client configuration.
 REM
-REM Usage (re-run from inside repo):
-REM   bootstrap.bat
+REM Fresh install:        powershell -c "irm https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
+REM From inside the repo: bootstrap.bat
+REM No questions:         bootstrap.bat --yes
+REM Every installer flag is passed through: bootstrap.bat --houdini-version 22.0 --harness codex
 
 echo.
-echo === HoudiniMCP Bootstrap ===
+echo === HoudiniMCP bootstrap ===
 echo.
 
-REM -------------------------------------------------------
-REM Step 1: Check prerequisites
-REM -------------------------------------------------------
-echo Step 1: Checking prerequisites
-
-REM Git (required)
 where git >nul 2>&1
-if %errorlevel% equ 0 (
-    for /f "tokens=*" %%v in ('git --version') do echo [OK]   %%v
-) else (
-    echo [FAIL] git is not installed. Please install git first.
-    echo        https://git-scm.com/download/win
+if errorlevel 1 (
+    echo [FAIL] git is required. https://git-scm.com/download/win
     exit /b 1
 )
+for /f "tokens=*" %%v in ('git --version') do echo [OK]   %%v
 
-REM Python 3.12+ (required)
 set "PYTHON="
 for %%c in (python3 python) do (
     if not defined PYTHON (
-        where %%c >nul 2>&1
-        if !errorlevel! equ 0 (
-            for /f "tokens=*" %%v in ('%%c -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')" 2^>nul') do (
-                set "py_ver=%%v"
-            )
-            if defined py_ver (
-                for /f "tokens=1,2 delims=." %%a in ("!py_ver!") do (
-                    if %%a geq 3 if %%b geq 12 (
-                        set "PYTHON=%%c"
-                    )
-                )
-            )
-        )
+        %%c -c "import sys; sys.exit(sys.version_info < (3, 10))" >nul 2>&1
+        if !errorlevel! equ 0 set "PYTHON=%%c"
     )
 )
-
-if defined PYTHON (
-    for /f "tokens=*" %%v in ('!PYTHON! --version') do echo [OK]   %%v
-) else (
-    echo [FAIL] Python 3.12+ is required but not found.
-    echo        https://www.python.org/downloads/
+if not defined PYTHON (
+    echo [FAIL] Python 3.10+ is required. https://www.python.org/downloads/
     exit /b 1
 )
+for /f "tokens=*" %%v in ('!PYTHON! --version') do echo [OK]   %%v
 
-REM Houdini (advisory — non-blocking)
-set "HOUDINI_FOUND=0"
-where houdini >nul 2>&1
-if %errorlevel% equ 0 (
-    set "HOUDINI_FOUND=1"
-    echo [OK]   Houdini found in PATH
+if exist "pyproject.toml" if exist "houdini_mcp_server.py" set "IN_REPO=1"
+if defined IN_REPO (
+    echo [OK]   Already inside the repository
 ) else (
-    if exist "C:\Program Files\Side Effects Software\Houdini*" (
-        set "HOUDINI_FOUND=1"
-        echo [OK]   Houdini found in Program Files
-    ) else (
-        echo [!!]   Houdini not detected (setup continues — install Houdini when ready^)
-    )
+    echo [..]   Cloning houdini-mcp...
+    git clone https://github.com/JTCHE/houdini-mcp.git || exit /b 1
+    cd houdini-mcp
+    echo [OK]   Cloned into !cd!
 )
-
-REM -------------------------------------------------------
-REM Step 2: Clone repo (skip if already inside it)
-REM -------------------------------------------------------
-echo.
-echo Step 2: Repository
-
-if exist "pyproject.toml" if exist "houdini_mcp_server.py" (
-    echo [OK]   Already inside houdini-mcp repo — skipping clone
-    goto :skip_clone
-)
-
-echo [..]   Cloning houdini-mcp...
-git clone https://github.com/kleer001/houdini-mcp.git
-cd houdini-mcp
-echo [OK]   Cloned into %cd%
-
-:skip_clone
-set "REPO_DIR=%cd%"
-
-REM -------------------------------------------------------
-REM Step 3: Install uv (skip if present)
-REM -------------------------------------------------------
-echo.
-echo Step 3: Package manager (uv)
 
 where uv >nul 2>&1
-if %errorlevel% equ 0 (
-    for /f "tokens=*" %%v in ('uv --version') do echo [OK]   uv already installed: %%v
-) else (
+if errorlevel 1 (
     echo [..]   Installing uv...
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    REM Refresh PATH to pick up uv
-    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
-    where uv >nul 2>&1
-    if !errorlevel! equ 0 (
-        for /f "tokens=*" %%v in ('uv --version') do echo [OK]   uv installed: %%v
-    ) else (
-        echo [FAIL] uv installation failed. Install manually: https://docs.astral.sh/uv/
-        exit /b 1
-    )
+    set "PATH=%USERPROFILE%\.local\bin;!PATH!"
 )
-
-REM -------------------------------------------------------
-REM Step 4: Create venv + install deps
-REM -------------------------------------------------------
-echo.
-echo Step 4: Python environment
-
-if not exist ".venv" (
-    echo [..]   Creating virtual environment...
-    uv venv
+where uv >nul 2>&1
+if errorlevel 1 (
+    echo [FAIL] uv install failed. https://docs.astral.sh/uv/
+    exit /b 1
 )
-echo [OK]   Virtual environment: .venv\
+for /f "tokens=*" %%v in ('uv --version') do echo [OK]   %%v
 
-echo [..]   Installing dependencies...
-uv sync
-echo [OK]   Dependencies installed
-
-REM -------------------------------------------------------
-REM Step 5: Install Houdini plugin
-REM -------------------------------------------------------
-echo.
-echo Step 5: Houdini plugin
-
-if %HOUDINI_FOUND% equ 1 (
-    echo [..]   Installing plugin into Houdini preferences...
-    uv run python scripts/install.py
-    echo [OK]   Plugin installed
-) else (
-    echo [!!]   Houdini not detected — skipping plugin install
-    echo        Run later: uv run python scripts/install.py
-)
-
-REM -------------------------------------------------------
-REM Step 6: Fetch Houdini docs
-REM -------------------------------------------------------
-echo.
-echo Step 6: Houdini documentation (offline search)
-
-if exist "houdini_docs_index.json" (
-    echo [OK]   Docs index already exists — skipping download
-) else (
-    echo [..]   Downloading Houdini docs (~100 MB)...
-    uv run python scripts/fetch_houdini_docs.py
-    echo [OK]   Documentation index built
-)
-
-REM -------------------------------------------------------
-REM Step 7: Configure MCP client
-REM -------------------------------------------------------
-echo.
-echo Step 7: MCP client configuration
-
-set "HAVE_CLAUDE_CODE=0"
-set "HAVE_CLAUDE_DESKTOP=0"
-
-where claude >nul 2>&1
-if !errorlevel! equ 0 (
-    set "HAVE_CLAUDE_CODE=1"
-    echo [OK]   Claude Code CLI detected
-)
-
-set "DESKTOP_CONFIG=%APPDATA%\Claude\claude_desktop_config.json"
-
-REM Detect Claude Desktop by app or existing config dir
-if exist "%LOCALAPPDATA%\Programs\claude-desktop" (
-    set "HAVE_CLAUDE_DESKTOP=1"
-)
-if exist "%APPDATA%\Claude" (
-    set "HAVE_CLAUDE_DESKTOP=1"
-)
-
-if !HAVE_CLAUDE_DESKTOP! equ 1 (
-    echo [OK]   Claude Desktop detected
-)
-
-REM Build forward-slash repo path for JSON
-set "JSON_PATH=%REPO_DIR:\=/%"
-
-if !HAVE_CLAUDE_CODE! equ 1 if !HAVE_CLAUDE_DESKTOP! equ 1 (
-    echo.
-    echo Detected both Claude Code and Claude Desktop.
-    echo   1^) Claude Code  (CLI^)
-    echo   2^) Claude Desktop (GUI^)
-    echo   3^) Both
-    set /p "MCP_CHOICE=Configure which? [1/2/3]: "
-    if "!MCP_CHOICE!"=="1" goto :cfg_code_only
-    if "!MCP_CHOICE!"=="2" goto :cfg_desktop_only
-    if "!MCP_CHOICE!"=="3" goto :cfg_both
-    echo [!!]   Invalid choice — skipping MCP configuration
-    goto :cfg_done
-)
-
-if !HAVE_CLAUDE_CODE! equ 1 goto :cfg_code_only
-if !HAVE_CLAUDE_DESKTOP! equ 1 goto :cfg_desktop_only
-
-REM Neither detected — print manual instructions
-echo [!!]   Neither Claude Code nor Claude Desktop detected.
-echo   Install one of:
-echo     Claude Code:    https://docs.anthropic.com/en/docs/claude-code
-echo     Claude Desktop: https://claude.ai/download
-echo.
-echo   Then re-run this script, or configure manually:
-echo     Claude Code:    claude mcp add --transport stdio houdini -- uv --directory "%REPO_DIR%" run python houdini_mcp_server.py
-echo     Claude Desktop: Add to %DESKTOP_CONFIG%:
-echo {
-echo   "mcpServers": {
-echo     "houdini": {
-echo       "command": "uv",
-echo       "args": [
-echo         "--directory",
-echo         "%JSON_PATH%",
-echo         "run",
-echo         "python",
-echo         "houdini_mcp_server.py"
-echo       ]
-echo     }
-echo   }
-echo }
-goto :cfg_done
-
-:cfg_both
-call :do_cfg_code
-call :do_cfg_desktop
-goto :cfg_done
-
-:cfg_code_only
-call :do_cfg_code
-goto :cfg_done
-
-:cfg_desktop_only
-call :do_cfg_desktop
-goto :cfg_done
-
-:do_cfg_code
-echo [..]   Configuring Claude Code MCP server...
-claude mcp remove houdini >nul 2>&1
-claude mcp add --transport stdio --scope user houdini -- uv --directory "%REPO_DIR%" run python houdini_mcp_server.py
-echo [OK]   Claude Code configured (verify with: claude mcp list)
-goto :eof
-
-:do_cfg_desktop
-echo [..]   Configuring Claude Desktop MCP server...
-!PYTHON! -c "import json,sys,os;cf=r'%DESKTOP_CONFIG%';rd=r'%REPO_DIR%';c=json.load(open(cf)) if os.path.exists(cf) else {};c.setdefault('mcpServers',{})['houdini']={'command':'uv','args':['--directory',rd,'run','python','houdini_mcp_server.py']};os.makedirs(os.path.dirname(cf),exist_ok=True);f=open(cf,'w');json.dump(c,f,indent=2);f.write('\n');f.close()"
-echo [OK]   Claude Desktop configured: %DESKTOP_CONFIG%
-goto :eof
-
-:cfg_done
-
-REM -------------------------------------------------------
-REM Done
-REM -------------------------------------------------------
-echo.
-echo === Setup complete! ===
-echo   Repo:   %REPO_DIR%
-echo   Venv:   %REPO_DIR%\.venv\
-if %HOUDINI_FOUND% equ 0 (
-    echo   Remember to install the Houdini plugin after installing Houdini:
-    echo     cd %REPO_DIR% ^& uv run python scripts/install.py
-)
-echo.
+uv run python scripts/onboarding/install.py %*
+exit /b !errorlevel!

@@ -1,0 +1,196 @@
+"""Detect the agent harnesses on this machine and register the bridge with them.
+
+Every harness runs the same command — `uv --directory <repo> run python
+houdini_mcp_server.py` — and differs only in where that command is written.
+"""
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+
+SERVER_NAME = "houdini"
+
+
+def server_command(repo_dir: str) -> dict:
+    return {
+        "command": "uv",
+        "args": ["--directory", repo_dir, "run", "python", "houdini_mcp_server.py"],
+    }
+
+
+def _home(*parts) -> str:
+    return os.path.join(os.path.expanduser("~"), *parts)
+
+
+def _write_json_server(path: str, repo_dir: str, dry_run: bool, key: str = "mcpServers") -> str:
+    """Merge the server into a JSON config, keeping everything else in it."""
+    config = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                config = json.load(handle)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{path} is not valid JSON: {error}")
+    config.setdefault(key, {})[SERVER_NAME] = server_command(repo_dir)
+    if not dry_run:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+    return path
+
+
+# ── Claude Code ──
+
+def _claude_code_detect() -> bool:
+    return bool(shutil.which("claude")) or os.path.isdir(_home(".claude"))
+
+
+def _claude_code_configure(repo_dir: str, dry_run: bool) -> str:
+    if not shutil.which("claude"):
+        return _write_json_server(_home(".claude.json"), repo_dir, dry_run)
+    if dry_run:
+        return "claude mcp add --scope user"
+    subprocess.run(["claude", "mcp", "remove", "--scope", "user", SERVER_NAME],
+                   capture_output=True, check=False)
+    command = server_command(repo_dir)
+    result = subprocess.run(
+        ["claude", "mcp", "add", "--transport", "stdio", "--scope", "user", SERVER_NAME,
+         "--", command["command"], *command["args"]],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "claude mcp add failed")
+    return "claude mcp list"
+
+
+# ── Claude Desktop ──
+
+def _claude_desktop_config() -> str:
+    system = platform.system()
+    if system == "Windows":
+        return os.path.join(os.environ.get("APPDATA", _home("AppData", "Roaming")),
+                            "Claude", "claude_desktop_config.json")
+    if system == "Darwin":
+        return _home("Library", "Application Support", "Claude", "claude_desktop_config.json")
+    return _home(".config", "Claude", "claude_desktop_config.json")
+
+
+def _claude_desktop_detect() -> bool:
+    if os.path.isdir(os.path.dirname(_claude_desktop_config())):
+        return True
+    system = platform.system()
+    if system == "Darwin":
+        return os.path.isdir("/Applications/Claude.app")
+    if system == "Windows":
+        return os.path.isdir(os.path.join(os.environ.get("LOCALAPPDATA", ""), "AnthropicClaude"))
+    return bool(shutil.which("claude-desktop"))
+
+
+def _claude_desktop_configure(repo_dir: str, dry_run: bool) -> str:
+    return _write_json_server(_claude_desktop_config(), repo_dir, dry_run)
+
+
+# ── Codex ──
+
+def _codex_detect() -> bool:
+    return bool(shutil.which("codex")) or os.path.isdir(_home(".codex"))
+
+
+def _codex_configure(repo_dir: str, dry_run: bool) -> str:
+    path = _home(".codex", "config.toml")
+    text = ""
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    # Drop any previous block for this server, up to the next table header.
+    text = re.sub(
+        rf"(?ms)^\[mcp_servers\.{SERVER_NAME}\].*?(?=^\[|\Z)", "", text
+    ).rstrip()
+    command = server_command(repo_dir)
+    block = (
+        f"[mcp_servers.{SERVER_NAME}]\n"
+        f'command = "{command["command"]}"\n'
+        f"args = {json.dumps(command['args'])}\n"
+    )
+    if not dry_run:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"{text}\n\n{block}" if text else block)
+    return path
+
+
+# ── Gemini CLI ──
+
+def _gemini_detect() -> bool:
+    return bool(shutil.which("gemini")) or os.path.isdir(_home(".gemini"))
+
+
+def _gemini_configure(repo_dir: str, dry_run: bool) -> str:
+    return _write_json_server(_home(".gemini", "settings.json"), repo_dir, dry_run)
+
+
+# ── Cursor ──
+
+def _cursor_detect() -> bool:
+    return os.path.isdir(_home(".cursor"))
+
+
+def _cursor_configure(repo_dir: str, dry_run: bool) -> str:
+    return _write_json_server(_home(".cursor", "mcp.json"), repo_dir, dry_run)
+
+
+class Harness:
+    def __init__(self, key, label, detect, configure):
+        self.key = key
+        self.label = label
+        self.detect = detect
+        self.configure = configure
+
+    @property
+    def installed(self) -> bool:
+        return bool(self.detect())
+
+
+HARNESSES = [
+    Harness("claude-code", "Claude Code (CLI)", _claude_code_detect, _claude_code_configure),
+    Harness("claude-desktop", "Claude Desktop", _claude_desktop_detect, _claude_desktop_configure),
+    Harness("codex", "OpenAI Codex", _codex_detect, _codex_configure),
+    Harness("gemini-cli", "Gemini CLI", _gemini_detect, _gemini_configure),
+    Harness("cursor", "Cursor", _cursor_detect, _cursor_configure),
+]
+
+BY_KEY = {harness.key: harness for harness in HARNESSES}
+
+
+def detected() -> list:
+    return [harness for harness in HARNESSES if harness.installed]
+
+
+# ── Claude Code tool permissions ──
+
+CLAUDE_PERMISSIONS = [
+    "mcp__houdini__*",
+    "Bash(mplay *)",
+    "Read(/tmp/*)",
+]
+
+
+def allow_claude_tools(dry_run: bool) -> list:
+    """Pre-approve the Houdini tools so Claude Code does not prompt per call."""
+    path = _home(".claude", "settings.json")
+    settings = {}
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as handle:
+            settings = json.load(handle)
+    allow = settings.setdefault("permissions", {}).setdefault("allow", [])
+    added = [rule for rule in CLAUDE_PERMISSIONS if rule not in allow]
+    if added and not dry_run:
+        allow.extend(added)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(settings, handle, indent=2)
+            handle.write("\n")
+    return added

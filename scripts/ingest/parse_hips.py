@@ -11,14 +11,14 @@ Parameter filtering:
   - Keeps only non-default, data-bearing parameters (~80% reduction)
 
 Usage:
-    hython scripts/parse_hips.py                          # auto-detect $HFS
-    hython scripts/parse_hips.py --hfs-dir /opt/hfs21.0
-    hython scripts/parse_hips.py --output hip_parsed.json
-    hython scripts/parse_hips.py --extra-dir ~/my_hips
-    hython scripts/parse_hips.py --workers 4              # parallel parsing
+    hython scripts/ingest/parse_hips.py                          # auto-detect $HFS
+    hython scripts/ingest/parse_hips.py --hfs-dir /opt/hfs21.0
+    hython scripts/ingest/parse_hips.py --output hip_parsed.json
+    hython scripts/ingest/parse_hips.py --extra-dir ~/my_hips
+    hython scripts/ingest/parse_hips.py --workers 4              # parallel parsing
 
     # Internal: worker mode (called by orchestrator, not by user)
-    hython scripts/parse_hips.py --worker-chunk chunk.json --worker-out out.json
+    hython scripts/ingest/parse_hips.py --worker-chunk chunk.json --worker-out out.json
 
 The output JSON has the same shape as hip_parser.py (cpio parser):
     [{"source", "nodes", "connections", "sticky_notes", "netboxes"}, ...]

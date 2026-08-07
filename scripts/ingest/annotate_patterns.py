@@ -5,11 +5,11 @@ Annotate extracted patterns — list, view, annotate, and track progress.
 Operates on the hip_patterns/ directory produced by `ingest_hips.py extract`.
 
 Usage:
-    python scripts/annotate_patterns.py list                  # show unannotated patterns
-    python scripts/annotate_patterns.py list --limit 5        # limit output
-    python scripts/annotate_patterns.py get <pattern_id>      # view a pattern
-    python scripts/annotate_patterns.py annotate <pattern_id> "summary text"
-    python scripts/annotate_patterns.py progress              # show annotation stats
+    python scripts/ingest/annotate_patterns.py list                  # show unannotated patterns
+    python scripts/ingest/annotate_patterns.py list --limit 5        # limit output
+    python scripts/ingest/annotate_patterns.py get <pattern_id>      # view a pattern
+    python scripts/ingest/annotate_patterns.py annotate <pattern_id> "summary text"
+    python scripts/ingest/annotate_patterns.py progress              # show annotation stats
 """
 
 import argparse
@@ -19,7 +19,7 @@ import sys
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 PATTERNS_DIR = os.path.join(REPO_ROOT, "hip_patterns")
 INDEX_PATH = os.path.join(REPO_ROOT, "hip_patterns_index.json")
 
@@ -27,7 +27,7 @@ INDEX_PATH = os.path.join(REPO_ROOT, "hip_patterns_index.json")
 def list_unannotated(limit=20):
     """Return patterns without annotations."""
     if not os.path.exists(INDEX_PATH):
-        return {"error": "No patterns index found. Run: python scripts/ingest_hips.py extract"}
+        return {"error": "No patterns index found. Run: python scripts/ingest/ingest_hips.py extract"}
 
     with open(INDEX_PATH) as f:
         entries = json.load(f)

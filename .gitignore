@@ -12,11 +12,7 @@ wheels/
 # Test artifacts
 .pytest_cache/
 
-# Houdini docs (fetched via scripts/fetch_houdini_docs.py)
-houdini_docs/
-houdini_docs_index.json
-
-# Hip ingest output (generated via scripts/ingest_hips.py and extract_hdas.py)
+# Hip ingest output (generated via scripts/ingest/)
 hip_parsed.json
 hda_parsed.json
 hip_patterns/

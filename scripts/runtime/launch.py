@@ -3,9 +3,9 @@
 launch.py — Start Houdini with the MCP plugin and optionally the MCP bridge.
 
 Usage:
-    python launch.py                  # Launch Houdini only (bridge started separately)
-    python launch.py --bridge         # Launch Houdini + MCP bridge
-    python launch.py --bridge-only    # Launch MCP bridge only (Houdini already running)
+    python scripts/runtime/launch.py                  # Launch Houdini only (bridge started separately)
+    python scripts/runtime/launch.py --bridge         # Launch Houdini + MCP bridge
+    python scripts/runtime/launch.py --bridge-only    # Launch MCP bridge only (Houdini already running)
 
 Environment variables:
     HOUDINI_PATH       Path to Houdini executable (e.g. /opt/hfs20.0/bin/houdini)
@@ -77,8 +77,8 @@ def launch_houdini(houdini_path, hip_file=None):
 
 def launch_bridge():
     """Launch the MCP bridge server in the foreground."""
-    # scripts/ is one level below the repo root where houdini_mcp_server.py lives
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # scripts/runtime/ is two levels below the repo root, where the bridge lives
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     bridge_script = os.path.join(repo_root, "houdini_mcp_server.py")
 
     if not os.path.isfile(bridge_script):

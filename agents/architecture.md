@@ -6,8 +6,10 @@ Three layers. Each runs in a different process.
    Speaks JSON over a TCP socket to the plugin. Holds the tool definitions.
 2. **Plugin** — `src/houdinimcp/`. Runs inside Houdini. `server.py` accepts the
    socket and dispatches to `handlers/`. Only this layer imports `hou`.
-3. **Offline** — `houdini_docs.py` and `scripts/`. No Houdini needed. Doc lookup,
-   `.hip` parsing, install, ingest.
+3. **Offline** — `houdini_docs.py` and `scripts/`. No Houdini needed.
+   `houdini_docs.py` reads the documentation from HoudiniMD over HTTP.
+   `scripts/onboarding/` installs, `scripts/runtime/` starts a session,
+   `scripts/ingest/` parses `.hip` files.
 
 A tool that needs `hou` gets a wrapper in the bridge and a function in a handler
 module. A tool that does not need `hou` stays in the bridge alone.
