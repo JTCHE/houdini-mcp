@@ -7,8 +7,8 @@ releases. Confirm a symbol exists before you call it: read the object with
 `dir()`, or query the live session. Do not add a version check — the code must
 run against the Houdini that the user has.
 
-Do not record API facts in this repo. Facts about one release go stale. Use
-`search_docs` and `get_doc` for reference, and the live session for truth.
+Do not record API facts in this repo. Facts about one release go stale. Use the
+`docs` tool for reference, and the live session for truth.
 
 ## Failure behaviour
 

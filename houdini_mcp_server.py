@@ -223,7 +223,7 @@ def _launch_headless_houdini() -> bool:
         logger.warning("Cannot launch headless Houdini: hython not found.")
         return False
 
-    headless_script = os.path.join(script_dir, "scripts", "headless_server.py")
+    headless_script = os.path.join(script_dir, "scripts", "runtime", "headless_server.py")
     if not os.path.isfile(headless_script):
         logger.error(f"Headless server script not found: {headless_script}")
         return False
@@ -343,9 +343,13 @@ IMPORTANT — Houdini MCP Connection Rules:
    the output file exists. No Houdini connection needed.
 
 9. **Confirm the API before you call it.** Houdini changes method names and enum
-   members between releases. Use `search_docs` / `get_doc` for reference, and
-   `execute_houdini_code` with `dir()` to confirm a symbol exists in the running
-   session.
+   members between releases, and a wrong name fails silently. The `docs` tool
+   reads the official documentation from HoudiniMD (houdinimd.com): search it
+   with `query`, read a page with `page`, read a scene node's own page with
+   `node`. Read the page before you use a node, parameter, VEX function or HOM
+   call you have not verified in this session. Do not answer from memory, and
+   do not scrape sidefx.com. Use `execute_houdini_code` with `dir()` to confirm
+   a symbol exists in the running session.
 
 10. **Expect silent failures.** A mismatched name or an active expression gives a
    wrong result and no error. Read back what you set, and check `find_error_nodes`
@@ -1641,52 +1645,59 @@ def subscribe_houdini_events(ctx: Context, types: List[str] = None) -> str:
 
 
 @mcp.tool()
-def search_docs(ctx: Context, query: str, top_k: int = 5) -> str:
-    """Search Houdini documentation via online proxy (houdinimd.jchd.me).
-    Ranks the ~10 500 doc paths by token overlap — no content download.
-    Returns {path, title, url, score}. Does NOT require a Houdini connection."""
-    from houdini_docs import search_docs as _search
-    results = _search(query, top_k)
-    if isinstance(results, dict) and "error" in results:
-        return f"Error: {results['error']}"
-    return json.dumps(results, indent=2)
+def docs(ctx: Context, query: str = None, page: str = None, node: str = None,
+         category: str = None, limit: int = 5) -> str:
+    """Read the official Houdini documentation from HoudiniMD (houdinimd.com).
 
-@mcp.tool()
-def get_doc(ctx: Context, path: str) -> str:
-    """Fetch the full markdown of a Houdini doc page, e.g. 'nodes/sop/attribwrangle'.
-    Fetches live from houdinimd.jchd.me. Does NOT require a Houdini connection."""
-    from houdini_docs import get_doc_content
-    result = get_doc_content(path)
-    if "error" in result:
-        return f"Error: {result['error']}"
-    return result["content"]
+    This is the authority on every node, parameter, VEX function and HOM call.
+    Read the page before you use an API you have not verified in this session —
+    names and enum members change between Houdini versions, and a wrong one
+    fails silently. Do not answer from memory, and do not scrape sidefx.com.
 
-@mcp.tool()
-def get_node_doc(ctx: Context, path: str) -> str:
-    """Fetch the documentation page for a scene node in one call.
-    Queries the Houdini plugin for the node's type/category/helpUrl, then
-    retrieves the corresponding markdown from houdinimd.jchd.me.
-    Requires a Houdini connection."""
-    from houdini_docs import parse_help_url, resolve_node_doc, get_doc_content
-    meta_resp = _send_tool_command("get_node_doc_meta", {"path": path})
-    try:
-        meta = json.loads(meta_resp)
-    except Exception:
-        return f"Error fetching node meta: {meta_resp}"
+    Give exactly one of:
+      query — words to search, e.g. "copy to points" or "point vex function".
+              Returns ranked {path, title, summary, category, version, score}.
+              Follow up with `page` to read the one you want.
+      page  — a page path from a search hit, e.g. "houdini/nodes/sop/copytopoints".
+              A loose name or a sidefx.com URL also works. Returns the markdown.
+      node  — a path to a node in the scene, e.g. "/obj/geo1/attribwrangle1".
+              Returns the markdown for that node's type. Needs Houdini.
 
-    doc_path = (
-        parse_help_url(meta.get("default_help_url"))
-        or resolve_node_doc(meta.get("type_name", ""), meta.get("category", ""))
-    )
-    result = get_doc_content(doc_path)
+    category filters a search to one exact category, e.g. "Nodes > Geometry nodes",
+    "Nodes > LOP nodes", "VEX > VEX Functions", "Python scripting > hou".
+    Only `node` needs a Houdini connection.
+    """
+    import houdini_docs
+
+    given = [name for name, value in (("query", query), ("page", page), ("node", node)) if value]
+    if len(given) != 1:
+        return "Error: give exactly one of query, page or node."
+
+    if query:
+        results = houdini_docs.search(query, limit, category)
+        if isinstance(results, dict):
+            return f"Error: {results['error']}"
+        return json.dumps(results, indent=2)
+
+    if node:
+        meta_response = _send_tool_command("get_node_doc_meta", {"path": node})
+        try:
+            meta = json.loads(meta_response)
+        except Exception:
+            return f"Error reading node type: {meta_response}"
+        page = houdini_docs.node_page(
+            meta.get("type_name", ""), meta.get("category", ""), meta.get("default_help_url")
+        )
+        result = houdini_docs.get_page(page)
+        if "error" in result:
+            # An HDA can carry a help URL that has no page. Resolve its name.
+            result = houdini_docs.get_page(houdini_docs.type_base_name(meta.get("type_name", "")))
+        return result["content"] if "content" in result else f"Error: {result['error']} ({page})"
+
+    result = houdini_docs.get_page(page)
     if "error" in result:
-        # Try search fallback
-        from houdini_docs import search_docs
-        hits = search_docs(meta.get("type_name", ""), top_k=1)
-        if hits and not isinstance(hits, dict):
-            result = get_doc_content(hits[0]["path"])
-    if "error" in result:
-        return f"Error: {result['error']}"
+        return f"Error: {result['error']} ({result['page']})"
+    # The page carries its own frontmatter, source URL included.
     return result["content"]
 
 @mcp.tool()
