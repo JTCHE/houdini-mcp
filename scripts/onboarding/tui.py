@@ -7,6 +7,9 @@ and the caller takes the default instead of asking.
 import os
 import sys
 
+# Every message goes here. `--json` moves it to stderr so stdout stays parseable.
+stream = sys.stdout
+
 _COLORS = {
     "cyan": "\033[0;36m",
     "green": "\033[0;32m",
@@ -44,20 +47,24 @@ def interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+def say(text: str = "") -> None:
+    print(text, file=stream)
+
+
 def title(text: str) -> None:
-    print(f"\n{paint(text, 'bold')}")
+    say(f"\n{paint(text, 'bold')}")
 
 
 def step(text: str) -> None:
-    print(f"{paint('[..]', 'cyan')}   {text}")
+    say(f"{paint('[..]', 'cyan')}   {text}")
 
 
 def ok(text: str) -> None:
-    print(f"{paint('[OK]', 'green')}   {text}")
+    say(f"{paint('[OK]', 'green')}   {text}")
 
 
 def warn(text: str) -> None:
-    print(f"{paint('[!!]', 'yellow')}   {text}")
+    say(f"{paint('[!!]', 'yellow')}   {text}")
 
 
 def fail(text: str) -> None:
@@ -103,15 +110,15 @@ def _read_key() -> str:
 
 
 def _draw(heading: str, lines: list, hint: str) -> None:
-    print(f"\n{paint(heading, 'bold')}")
+    say(f"\n{paint(heading, 'bold')}")
     for line in lines:
-        print(line)
-    print(paint(hint, "dim"))
+        say(line)
+    say(paint(hint, "dim"))
 
 
 def _erase(line_count: int) -> None:
-    sys.stdout.write(f"\033[{line_count}A\033[J" if _USE_COLOR else "\n")
-    sys.stdout.flush()
+    stream.write(f"\033[{line_count}A\033[J" if _USE_COLOR else "\n")
+    stream.flush()
 
 
 def select(heading: str, options: list, default: int = 0) -> int:

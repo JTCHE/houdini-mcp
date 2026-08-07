@@ -111,7 +111,7 @@ def sync_dependencies(dry_run):
     if dry_run:
         tui.step("would run: uv sync")
         return True
-    result = subprocess.run(["uv", "sync"], cwd=REPO_DIR)
+    result = subprocess.run(["uv", "sync"], cwd=REPO_DIR, stdout=tui.stream)
     if result.returncode != 0:
         tui.fail("uv sync failed")
         return False
@@ -133,14 +133,18 @@ def main():
         }, indent=2))
         return 0
 
+    if args.json:
+        # stdout carries the JSON report and nothing else.
+        tui.stream = sys.stderr
+
     asking = tui.interactive() and not args.yes
     summary = {"repo_dir": REPO_DIR, "dry_run": args.dry_run,
                "plugin": None, "harnesses": [], "errors": []}
 
     tui.title("=== HoudiniMCP install ===")
-    print(f"  Repository: {REPO_DIR}")
+    tui.say(f"  Repository: {REPO_DIR}")
     if not asking:
-        print("  No terminal or --yes given: taking the default for every question.")
+        tui.say("  No terminal or --yes given: taking the default for every question.")
 
     tui.title("Houdini")
     if installs:
@@ -185,7 +189,7 @@ def main():
     tui.title("MCP client configuration")
     if not chosen:
         tui.warn("No harness configured. Register the bridge yourself:")
-        print(f"    uv --directory {REPO_DIR} run python houdini_mcp_server.py")
+        tui.say(f"    uv --directory {REPO_DIR} run python houdini_mcp_server.py")
     for harness in chosen:
         try:
             target = harness.configure(REPO_DIR, args.dry_run)
@@ -202,7 +206,7 @@ def main():
 
     tui.title("Done")
     if summary["plugin"]:
-        print("  Restart Houdini. The plugin starts the TCP server when Houdini loads it.")
+        tui.say("  Restart Houdini. The plugin starts the TCP server when Houdini loads it.")
     if summary["errors"]:
         for error in summary["errors"]:
             tui.fail(error)

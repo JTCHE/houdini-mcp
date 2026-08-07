@@ -47,6 +47,10 @@ curl -sSL https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/bootstrap.sh 
 At a terminal you get menus: which Houdini release to install for, which
 harnesses to configure — Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor.
 
+Already have the repository? Skip the bootstrap script, it only clones and
+installs uv. Run the installer directly from the repository root:
+`uv run python scripts/onboarding/install.py`.
+
 <details>
 <summary><strong>Unattended install (agents, CI, scripted setup)</strong></summary>
 
@@ -70,11 +74,18 @@ uv run python scripts/onboarding/install.py --dry-run --yes
 ```
 
 `bootstrap.sh` and `bootstrap.bat` pass every flag through, so the one-line
-install above works unattended too: `bash bootstrap.sh --yes`.
+install above works unattended too — `bash bootstrap.sh --yes` on Linux and
+macOS, `.\bootstrap.bat --yes` on Windows.
 
 Useful flags: `--houdini-version none` skips the plugin, `--prefs-dir` names the
 Houdini preferences directory outright, `--harness none` leaves every client
 alone, `--skip-deps` skips `uv sync`.
+
+With `--json`, stdout carries the JSON report and nothing else — the progress
+log goes to stderr. The report names every file written and every client
+configured, so it is also the verification: read `plugin.wrote` and
+`harnesses[].target` back, and check `errors` is empty. `claude mcp list` is the
+independent check for Claude Code.
 
 </details>
 
