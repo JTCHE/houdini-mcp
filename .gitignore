@@ -25,3 +25,6 @@ hip_patterns_index.json
 # env files
 .env
 .env.*
+
+# agent environment-specific 
+.claude
