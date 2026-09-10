@@ -2,13 +2,17 @@
 
 <img src="public/cover.png" alt="An illustration titled &quot;Houdini MCP&quot;, showing multiple agentic platforms connected to Houdini, symbolizing a link" />
 
+<p align="center" alt="HoudiniMCP Server Glama Badge">
+  <a href="https://glama.ai/mcp/servers/JTCHE/houdini-mcp"><img src="https://glama.ai/mcp/servers/JTCHE/houdini-mcp/badges/card.svg">
+  </a>
+</p>
+
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/JTCHE/houdini-mcp?color=blue" alt="License: MIT"/></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white" alt="Python 3.10+"/></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-compatible-green" alt="MCP Compatible"/></a>
   <a href="https://www.sidefx.com/"><img src="https://img.shields.io/badge/Houdini-22.0-orange" alt="Houdini 22.0"/></a>
 </p>
-
 ---
 
 Control **SideFX Houdini** from an AI client (Claude, ChatGPT Codex, Gemini) through the **Model Context Protocol**.
@@ -18,12 +22,16 @@ The bridge talks to Houdini's Python API over a local TCP socket.
 If no Houdini GUI is running, the bridge starts a
 headless `hython` session, so you can work without the UI.
 
-- **Node, geometry, parameter, render, USD, PDG, HDA, COP, CHOP and DOP tools** —
-  the current list is the set of `@mcp.tool()` functions in
-  [`houdini_mcp_server.py`](houdini_mcp_server.py).
+- **20 tools** — one for each noun: `scene_overview`, `node_inspect`,
+  `geometry_inspect`, `stage_inspect`, `node_edit`, `parm_set`, `connect`,
+  `cook`, `execute`, `render`, `capture`, `console`, `docs`, `playbar`,
+  `scene_file`, `select`, `hda`, `pdg`, `session`, `batch`. A `mode` argument
+  chooses the action, and every tool takes one item or a list. The modules are
+  in [`src/bridge/tools/`](src/bridge/tools/).
+- **Honest failures** — a write that Houdini silently ignored is reported as
+  such, and every error names the next action.
 - **Documentation** — the official Houdini docs, read live from
-  [HoudiniMD](https://houdinimd.com), plus patterns from your own install.
-- **Event system** — Houdini pushes scene changes back to the client.
+  [HoudiniMD](https://houdinimd.com).
 
 ## Install
 
@@ -101,8 +109,8 @@ claude mcp add --transport stdio houdini -- uv --directory /path/to/houdini-mcp 
 For a client that reads a JSON config, point `command` at `uv` with
 `args: ["--directory", "/path/to/houdini-mcp", "run", "python", "houdini_mcp_server.py"]`.
 
-ChatGPT accepts remote MCP servers only. Serve the bridge over HTTP
-(`fastmcp run houdini_mcp_server.py --transport http`) and expose it with a tunnel.
+ChatGPT accepts remote MCP servers only. The bridge speaks stdio, so put a
+stdio-to-HTTP proxy in front of it and expose that with a tunnel.
 
 </details>
 
@@ -115,8 +123,8 @@ MCP client ──stdio──> houdini_mcp_server.py ──TCP──> src/houdini
 No Houdini running? The bridge starts hython -> scripts/runtime/headless_server.py
 ```
 
-`scripts/` holds `onboarding/` (install), `runtime/` (headless session, launch)
-and `ingest/` (the `.hip` pattern pipeline).
+`scripts/` holds `onboarding/` (install) and `runtime/` (headless session,
+launch).
 
 The installer also adds a **HoudiniMCP** shelf with a button that starts and
 stops the TCP server.
