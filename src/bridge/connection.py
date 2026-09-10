@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from houdinimcp import protocol
 
 logger = logging.getLogger("HoudiniMCP.bridge")
@@ -27,10 +29,12 @@ _connection = None
 _hython = None
 
 
-class HoudiniError(RuntimeError):
+class HoudiniError(ToolError):
     """Houdini could not be reached, or it refused the command.
 
     The message says what to do next. Show it to the user as it is.
+    It is a ToolError because the MCP SDK hides the text of any other exception
+    and sends only "Error executing tool <name>".
     """
 
 
