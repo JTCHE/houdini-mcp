@@ -1,9 +1,21 @@
 [project]
 name = "houdinimcp"
-version = "0.1.0"
-description = "MCP bridge connecting SideFX Houdini to Claude AI"
+version = "0.2.0"
+description = "MCP server for SideFX Houdini: 20 tools, honest failures, live documentation"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "John Chedeville" }]
+keywords = ["houdini", "sidefx", "mcp", "model-context-protocol", "vfx", "3d"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "mcp[cli]>=2.2",
 ]
@@ -12,6 +24,7 @@ dependencies = [
 # except the bootstrap scripts, which run before the repository exists.
 [project.urls]
 Repository = "https://github.com/JTCHE/houdini-mcp"
+Issues = "https://github.com/JTCHE/houdini-mcp/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -25,8 +38,13 @@ packages = ["src/houdinimcp", "src/bridge"]
 [tool.hatch.build.targets.wheel.force-include]
 "houdini_docs.py" = "houdini_docs.py"
 
+[tool.hatch.build.targets.sdist]
+include = ["src", "houdini_docs.py", "houdini_mcp_server.py", "README.md",
+           "LICENSE", "AGENTS.md", "agents", "bootstrap.sh", "bootstrap.bat"]
+
 [project.scripts]
 houdinimcp-bridge = "bridge.cli:main"
+houdinimcp-install = "bridge.onboarding.install:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,10 +12,14 @@ import json
 import os
 import shutil
 
+import houdinimcp
+
 PACKAGE_NAME = "houdinimcp"
 
-MODULE_DIR = "src/houdinimcp"
-SHELF_FILE = "src/houdinimcp/houdinimcp.shelf"
+# The plugin is copied from the houdinimcp package that this installer imports,
+# so a repository checkout and a wheel both install the code that runs here.
+MODULE_DIR = os.path.dirname(os.path.abspath(houdinimcp.__file__))
+SHELF_FILE = os.path.join(MODULE_DIR, "houdinimcp.shelf")
 
 # Houdini runs this after the UI is ready, in a graphical session only.
 UIREADY_SCRIPT = """\
@@ -25,7 +29,7 @@ houdinimcp.start_server()
 """
 
 
-def install(prefs_dir: str, repo_dir: str, python_libs: str, dry_run: bool = False) -> dict:
+def install(prefs_dir: str, python_libs: str, dry_run: bool = False) -> dict:
     """Install the plugin for one Houdini release. Returns what it wrote.
 
     python_libs is the name of Houdini's Python library directory, for example
@@ -38,7 +42,7 @@ def install(prefs_dir: str, repo_dir: str, python_libs: str, dry_run: bool = Fal
     if not dry_run:
         shutil.rmtree(module_dest, ignore_errors=True)
         shutil.copytree(
-            os.path.join(repo_dir, MODULE_DIR), module_dest,
+            MODULE_DIR, module_dest,
             ignore=shutil.ignore_patterns("__pycache__", "*.shelf"),
         )
     log.append(f"module -> {module_dest}")
@@ -52,7 +56,7 @@ def install(prefs_dir: str, repo_dir: str, python_libs: str, dry_run: bool = Fal
     if not dry_run:
         _write(uiready, UIREADY_SCRIPT)
         os.makedirs(os.path.dirname(shelf), exist_ok=True)
-        shutil.copy2(os.path.join(repo_dir, SHELF_FILE), shelf)
+        shutil.copy2(SHELF_FILE, shelf)
         _write(package_file, json.dumps(package, indent=2) + "\n")
     log.append(f"start on load -> {uiready}")
     log.append(f"shelf -> {shelf}")

@@ -19,8 +19,9 @@ logger = logging.getLogger("HoudiniMCP.bridge")
 
 PORT = protocol.PORT
 HEADLESS_DISABLED = os.getenv("HOUDINIMCP_NO_HEADLESS", "").strip() in ("1", "true", "yes")
-REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-HEADLESS_SCRIPT = os.path.join(REPO_DIR, "scripts", "runtime", "headless_server.py")
+# hython runs this file by path, because it cannot import from the bridge venv.
+HEADLESS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(protocol.__file__)),
+                               "headless.py")
 
 _connection = None
 _hython = None

@@ -1,7 +1,7 @@
 """The HoudiniMCP plugin, which runs inside Houdini.
 
 A GUI session starts the server from `uiready.py`, which the installer writes.
-A headless session starts it from `scripts/runtime/headless_server.py`.
+A headless session starts it from `headless.py`.
 
 This module must import without `hou`: the bridge imports `houdinimcp.protocol`
 from its own venv, outside Houdini.

@@ -1,7 +1,8 @@
 """Detect the agent harnesses on this machine and register the bridge with them.
 
-Every harness runs the same command — `uv --directory <repo> run python
-houdini_mcp_server.py` — and differs only in where that command is written.
+Every harness runs the same command and differs only in where that command is
+written. The command is `houdinimcp-bridge` from an installed package, and
+`uv --directory <repo> run python houdini_mcp_server.py` from a checkout.
 """
 import json
 import os
@@ -9,15 +10,45 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 
 SERVER_NAME = "houdini"
 
 
-def server_command(repo_dir: str) -> dict:
-    return {
-        "command": "uv",
-        "args": ["--directory", repo_dir, "run", "python", "houdini_mcp_server.py"],
-    }
+def server_command(repo_dir: str = None) -> dict:
+    """The command a harness runs to start the bridge.
+
+    repo_dir names a checkout. Without one the bridge came from a package, and
+    the console script that pip or uv put on the path starts it.
+    """
+    if repo_dir:
+        return {
+            "command": "uv",
+            "args": ["--directory", repo_dir, "run", "python", "houdini_mcp_server.py"],
+        }
+    return {"command": _bridge_script(), "args": []}
+
+
+def _bridge_script() -> str:
+    """The path of the houdinimcp-bridge console script.
+
+    A harness starts the bridge with its own environment, so the name alone is
+    not enough: it must be the full path of the script that belongs to the
+    Python that runs this installer.
+    """
+    name = "houdinimcp-bridge.exe" if os.name == "nt" else "houdinimcp-bridge"
+    for folder in (os.path.dirname(sys.executable),
+                   os.path.join(os.path.dirname(sys.executable), "Scripts"),
+                   os.path.join(sys.prefix, "bin")):
+        candidate = os.path.join(folder, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return shutil.which("houdinimcp-bridge") or "houdinimcp-bridge"
+
+
+def server_command_text(repo_dir: str = None) -> str:
+    command = server_command(repo_dir)
+    return " ".join([command["command"], *command["args"]])
 
 
 def _home(*parts) -> str:

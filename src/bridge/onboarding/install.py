@@ -5,11 +5,14 @@ MCP client configuration of every agent harness you choose.
 
 A person gets menus. An agent gets flags and JSON, and the same defaults:
 
-    python scripts/onboarding/install.py                    # menus when a terminal is attached
-    python scripts/onboarding/install.py --list             # what is on this machine, as JSON
-    python scripts/onboarding/install.py --yes              # no questions, newest Houdini, every harness
-    python scripts/onboarding/install.py --houdini-version 22.0 --harness claude-code --json
-    python scripts/onboarding/install.py --dry-run          # report, change nothing
+    houdinimcp-install                    # menus when a terminal is attached
+    houdinimcp-install --list             # what is on this machine, as JSON
+    houdinimcp-install --yes              # no questions, newest Houdini, every harness
+    houdinimcp-install --houdini-version 22.0 --harness claude-code --json
+    houdinimcp-install --dry-run          # report, change nothing
+
+From a checkout, run the same thing with
+`uv run python -m bridge.onboarding.install`.
 
 Without a terminal (a pipe, CI, an agent) the installer never blocks: it takes
 the default for every question and says which default it took.
@@ -21,14 +24,17 @@ import shutil
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from . import harnesses, houdini, plugin, tui
 
-import harnesses
-import houdini
-import plugin
-import tui
 
-REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def repo_dir() -> str:
+    """The checkout that holds this code, or None when it came from a package."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    return root if os.path.isfile(os.path.join(root, "pyproject.toml")) else None
+
+
+REPO_DIR = repo_dir()
 
 
 def parse_args():
@@ -105,6 +111,9 @@ def choose_harnesses(args, asking):
 
 def sync_dependencies(dry_run):
     """Create the venv and install the dependencies with uv."""
+    if not REPO_DIR:
+        tui.step("Installed from a package — the dependencies are already there")
+        return True
     if not shutil.which("uv"):
         tui.warn("uv is not installed — skipping dependencies. See https://docs.astral.sh/uv/")
         return False
@@ -142,7 +151,8 @@ def main():
                "plugin": None, "harnesses": [], "errors": []}
 
     tui.title("=== HoudiniMCP install ===")
-    tui.say(f"  Repository: {REPO_DIR}")
+    tui.say(f"  Repository: {REPO_DIR}" if REPO_DIR
+            else f"  Package: {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
     if not asking:
         tui.say("  No terminal or --yes given: taking the default for every question.")
 
@@ -184,7 +194,7 @@ def main():
             tui.fail(f"Plugin install failed: {error}")
         else:
             try:
-                summary["plugin"] = plugin.install(prefs_dir, REPO_DIR, python_libs, args.dry_run)
+                summary["plugin"] = plugin.install(prefs_dir, python_libs, args.dry_run)
                 for line in summary["plugin"]["wrote"]:
                     tui.step(line)
                 tui.ok(f"Plugin installed into {prefs_dir}")
@@ -197,7 +207,7 @@ def main():
     tui.title("MCP client configuration")
     if not chosen:
         tui.warn("No harness configured. Register the bridge yourself:")
-        tui.say(f"    uv --directory {REPO_DIR} run python houdini_mcp_server.py")
+        tui.say(f"    {harnesses.server_command_text(REPO_DIR)}")
     for harness in chosen:
         try:
             target = harness.configure(REPO_DIR, args.dry_run)
@@ -223,9 +233,14 @@ def main():
     return 1 if summary["errors"] else 0
 
 
-if __name__ == "__main__":
+def cli():
+    """The console script: run the installer and set the exit code."""
     try:
         sys.exit(main())
     except KeyboardInterrupt:
         tui.warn("Cancelled.")
         sys.exit(130)
+
+
+if __name__ == "__main__":
+    cli()

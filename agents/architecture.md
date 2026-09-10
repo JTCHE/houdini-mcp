@@ -2,16 +2,18 @@
 
 Three layers. Each runs in a different process.
 
-1. **Bridge** — `houdini_mcp_server.py` and `src/bridge/`. Speaks MCP over stdio
-   to the client, and JSON over a TCP socket to the plugin. `connection.py` is
-   the only place that touches the socket, and it starts a headless Houdini when
-   nothing listens. `tools/` holds one module for each tool.
+1. **Bridge** — `src/bridge/`, started by `houdini_mcp_server.py` in a clone or
+   by the `houdinimcp-bridge` console script from the package. Speaks MCP over
+   stdio to the client, and JSON over a TCP socket to the plugin.
+   `connection.py` is the only place that touches the socket, and it starts a
+   headless Houdini when nothing listens. `tools/` holds one module for each
+   tool, and `onboarding/` holds the installer.
 2. **Plugin** — `src/houdinimcp/`. Runs inside Houdini. `server.py` accepts the
    socket, `tools/` holds one module for each tool, and the tools call
-   `handlers/`. Only this layer imports `hou`.
-3. **Offline** — `houdini_docs.py` and `scripts/`. No Houdini needed.
-   `houdini_docs.py` reads the documentation from HoudiniMD over HTTP.
-   `scripts/onboarding/` installs, `scripts/runtime/` starts a session.
+   `handlers/`. `headless.py` runs the plugin in hython. Only this layer imports
+   `hou`.
+3. **Offline** — `houdini_docs.py`. No Houdini needed. It reads the
+   documentation from HoudiniMD over HTTP.
 
 `src/houdinimcp/protocol.py` holds the port and the wire format. Both sides
 import it, so neither side can define its own port. A message is a 4-byte

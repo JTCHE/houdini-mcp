@@ -35,10 +35,11 @@ headless `hython` session, so you can work without the UI.
 
 ## Install
 
-**Prerequisites:** git and Python 3.10+. Houdini is optional at setup time.
+**Prerequisites:** Python 3.10+. Houdini is optional at setup time.
 
-The script clones the repo, installs [uv](https://docs.astral.sh/uv/), installs
-the Houdini plugin, and registers the bridge with the agent harnesses you pick.
+The script installs [uv](https://docs.astral.sh/uv/) and the `houdinimcp`
+package from PyPI, installs the Houdini plugin, and registers the bridge with
+the agent harnesses you pick.
 
 **Windows**
 
@@ -55,9 +56,12 @@ curl -sSL https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/bootstrap.sh 
 At a terminal you get menus: which Houdini release to install for, which
 harnesses to configure — Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor.
 
-Already have the repository? Skip the bootstrap script, it only clones and
-installs uv. Run the installer directly from the repository root:
-`uv run python scripts/onboarding/install.py`.
+Have uv already? `uv tool install houdinimcp && houdinimcp-install` does the
+same thing.
+
+Working from a clone? Run the installer from the repository root:
+`uv run python -m bridge.onboarding.install`. It installs the plugin from that
+clone, and points every harness at it.
 
 <details>
 <summary><strong>Unattended install (agents, CI, scripted setup)</strong></summary>
@@ -68,18 +72,19 @@ it did.
 
 ```bash
 # What is on this machine, as JSON: Houdini releases, harnesses, uv
-uv run python scripts/onboarding/install.py --list
+houdinimcp-install --list
 
 # Every default: newest Houdini, every detected harness
-uv run python scripts/onboarding/install.py --yes
+houdinimcp-install --yes
 
 # Explicit, and report what changed
-uv run python scripts/onboarding/install.py \
-    --houdini-version 22.0 --harness claude-code --harness codex --yes --json
+houdinimcp-install --houdini-version 22.0 --harness claude-code --harness codex --yes --json
 
 # Report only, change nothing
-uv run python scripts/onboarding/install.py --dry-run --yes
+houdinimcp-install --dry-run --yes
 ```
+
+From a clone, `uv run python -m bridge.onboarding.install` takes the same flags.
 
 `bootstrap.sh` and `bootstrap.bat` pass every flag through, so the one-line
 install above works unattended too — `bash bootstrap.sh --yes` on Linux and
@@ -87,7 +92,7 @@ macOS, `.\bootstrap.bat --yes` on Windows.
 
 Useful flags: `--houdini-version none` skips the plugin, `--prefs-dir` names the
 Houdini preferences directory outright, `--harness none` leaves every client
-alone, `--skip-deps` skips `uv sync`.
+alone, `--skip-deps` skips `uv sync` in a clone.
 
 With `--json`, stdout carries the JSON report and nothing else — the progress
 log goes to stderr. The report names every file written and every client
@@ -101,12 +106,13 @@ independent check for Claude Code.
 <summary><strong>Manual setup</strong></summary>
 
 ```bash
-uv sync
-uv run python scripts/onboarding/install.py --harness none   # plugin only
-claude mcp add --transport stdio houdini -- uv --directory /path/to/houdini-mcp run python houdini_mcp_server.py
+uv tool install houdinimcp
+houdinimcp-install --harness none                              # plugin only
+claude mcp add --transport stdio houdini -- houdinimcp-bridge
 ```
 
-For a client that reads a JSON config, point `command` at `uv` with
+For a client that reads a JSON config, point `command` at `houdinimcp-bridge`
+with no arguments. From a clone, point it at `uv` with
 `args: ["--directory", "/path/to/houdini-mcp", "run", "python", "houdini_mcp_server.py"]`.
 
 ChatGPT accepts remote MCP servers only. The bridge speaks stdio, so put a
@@ -117,14 +123,14 @@ stdio-to-HTTP proxy in front of it and expose that with a tunnel.
 ## How it works
 
 ```
-MCP client ──stdio──> houdini_mcp_server.py ──TCP──> src/houdinimcp/ ──> hou API
-                                            └─────> houdini_docs.py ──HTTP──> houdinimd.com
+MCP client ──stdio──> src/bridge/ ──TCP──> src/houdinimcp/ ──> hou API
+                                  └──────> houdini_docs.py ──HTTP──> houdinimd.com
 
-No Houdini running? The bridge starts hython -> scripts/runtime/headless_server.py
+No Houdini running? The bridge starts hython -> houdinimcp/headless.py
 ```
 
-`scripts/` holds `onboarding/` (install) and `runtime/` (headless session,
-launch).
+`src/bridge/` is the MCP side and holds the installer. `src/houdinimcp/` is the
+plugin, which Houdini loads from a copy in its preferences directory.
 
 The installer also adds a **HoudiniMCP** shelf with a button that starts and
 stops the TCP server.
