@@ -1,14 +1,10 @@
 """Houdini-side TCP server that receives JSON commands from the MCP bridge."""
 import hou
-import json
+import select
 import socket
 import traceback
-import os
-try:
-    from PySide6 import QtCore
-except ImportError:
-    from PySide2 import QtCore
 
+from . import protocol
 from .handlers.scene import (
     get_scene_info, save_scene, load_scene, set_frame, get_asset_lib_status,
 )
@@ -93,8 +89,6 @@ EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 2)
 EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 
-DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9877))
-
 
 class HoudiniMCPServer:
     MUTATING_COMMANDS = {
@@ -131,89 +125,103 @@ class HoudiniMCPServer:
     DANGEROUS_PATTERNS = DANGEROUS_PATTERNS
 
     def __init__(self, host='localhost', port=None):
-        port = port if port is not None else DEFAULT_PORT
         self.host = host
-        self.port = port
+        self.port = port if port is not None else protocol.PORT
         self.running = False
         self.socket = None
         self.client = None
         self.buffer = b''
-        self.timer = None
         self.event_collector = EventCollector()
+        # One object, so removeEventLoopCallback finds the callback it added.
+        self._poll = self._process_server
 
     def start(self):
-        """Begin listening on the given port; sets up a QTimer to poll for data."""
-        self.running = True
+        """Listen on the port. In a GUI the Houdini event loop drives the poll.
+
+        In hython there is no event loop, so the caller runs serve_forever.
+        """
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            # Windows shares a bound port unless the first owner refuses it.
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             self.socket.bind((self.host, self.port))
-            self.socket.listen(1)
-            self.socket.setblocking(False)
-            self.timer = QtCore.QTimer()
-            self.timer.timeout.connect(self._process_server)
-            self.timer.start(100)
-            print(f"HoudiniMCP server started on {self.host}:{self.port}")
-            self.event_collector.start()
-        except Exception as e:
-            print(f"Failed to start server: {str(e)}")
-            self.stop()
+        except OSError as error:
+            self.socket.close()
+            self.socket = None
+            raise OSError(
+                f"HoudiniMCP cannot listen on {self.host}:{self.port}: {error}. "
+                f"Another process holds the port. Stop it, or set HOUDINIMCP_PORT "
+                f"to a free port in Houdini and in the MCP client."
+            ) from error
+        self.socket.listen(1)
+        self.socket.setblocking(False)
+        self.running = True
+        if hou.isUIAvailable():
+            hou.ui.addEventLoopCallback(self._poll)
+        self.event_collector.start()
+        print(f"HoudiniMCP server started on {self.host}:{self.port}")
+
+    def serve_forever(self):
+        """Drive the poll from this thread. For hython, which has no event loop."""
+        while self.running:
+            waiting = [sock for sock in (self.socket, self.client) if sock]
+            select.select(waiting, [], [], 0.5)
+            self._process_server()
 
     def stop(self):
-        """Stop listening; close sockets and timers."""
+        """Stop listening and close the sockets."""
         self.running = False
         self.event_collector.stop()
-        if self.timer:
-            self.timer.stop()
-            self.timer = None
+        if hou.isUIAvailable():
+            hou.ui.removeEventLoopCallback(self._poll)
+        self._drop_client()
         if self.socket:
             self.socket.close()
-        if self.client:
-            self.client.close()
         self.socket = None
-        self.client = None
         print("HoudiniMCP server stopped")
 
+    def _drop_client(self):
+        if self.client:
+            self.client.close()
+        self.client = None
+        self.buffer = b''
+
     def _process_server(self):
-        """Timer callback to accept connections and process incoming data."""
+        """Accept a client and answer every complete frame it sent. Never blocks."""
         if not self.running:
             return
         try:
-            if not self.client and self.socket:
+            if not self.client:
                 try:
                     self.client, address = self.socket.accept()
-                    self.client.setblocking(False)
-                    print(f"Connected to client: {address}")
                 except BlockingIOError:
-                    pass
-                except Exception as e:
-                    print(f"Error accepting connection: {str(e)}")
-            if self.client:
+                    return
+                self.client.setblocking(False)
+                print(f"Connected to client: {address}")
+
+            while True:
                 try:
-                    data = self.client.recv(8192)
-                    if data:
-                        self.buffer += data
-                        try:
-                            command = json.loads(self.buffer.decode('utf-8'))
-                            self.buffer = b''
-                            response = self.execute_command(command)
-                            self.client.sendall(json.dumps(response).encode('utf-8'))
-                        except json.JSONDecodeError:
-                            pass
-                    else:
-                        print("Client disconnected")
-                        self.client.close()
-                        self.client = None
-                        self.buffer = b''
+                    data = self.client.recv(protocol.CHUNK)
                 except BlockingIOError:
-                    pass
-                except Exception as e:
-                    print(f"Error receiving data: {str(e)}")
-                    self.client.close()
-                    self.client = None
-                    self.buffer = b''
-        except Exception as e:
-            print(f"Server error: {str(e)}")
+                    break
+                if not data:
+                    print("Client disconnected")
+                    self._drop_client()
+                    return
+                self.buffer += data
+
+            commands, self.buffer = protocol.decode(self.buffer)
+            for command in commands:
+                response = protocol.encode(self.execute_command(command))
+                self.client.setblocking(True)
+                self.client.sendall(response)
+                self.client.setblocking(False)
+        except OSError as error:
+            print(f"HoudiniMCP: connection lost: {error}")
+            self._drop_client()
 
     def execute_command(self, command):
         """Entry point for executing a JSON command from the client."""

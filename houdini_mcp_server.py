@@ -35,7 +35,10 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP, Context
 import asyncio
 
-HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", 9877))
+sys.path.insert(0, os.path.join(script_dir, "src"))
+from houdinimcp import protocol
+
+HOUDINI_PORT = protocol.PORT
 HEADLESS_DISABLED = os.getenv("HOUDINIMCP_NO_HEADLESS", "").strip() in ("1", "true", "yes")
 
 logging.basicConfig(level=logging.INFO)
@@ -58,7 +61,7 @@ class HoudiniConnection:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
-            self.connected_since = asyncio.get_event_loop().time()
+            self.connected_since = _time.monotonic()
             logger.info(f"Connected to Houdini at {self.host}:{self.port}")
             return True
         except Exception as e:
@@ -92,62 +95,38 @@ class HoudiniConnection:
         """
         Send a JSON command to Houdini's server and wait for the JSON response.
         Returns the parsed Python dict (e.g. {"status": "success", "result": {...}})
+
+        A plugin restart kills the socket but not this object, so a lost
+        connection is opened again once. The old plugin never read the command,
+        so the second try cannot repeat work.
         """
-        if not self.connect():
-            error_msg = f"Could not connect to Houdini on port {self.port}."
-            logger.error(error_msg)
-            return {"status": "error", "message": error_msg, "origin": "mcp_server_connection"}
-
         command = {"type": cmd_type, "params": params or {}}
-        data_out = json.dumps(command).encode("utf-8")
-
-        timeout = 30.0
-        recv_size = 8192
-
-        try:
-            # Send the command
-            self.sock.sendall(data_out)
-            self.last_command_at = asyncio.get_event_loop().time()
-            self.command_count += 1
-            logger.info(f"Sent command to Houdini: {command}")
-
-            # Read response. We'll accumulate chunks until we can parse a full JSON.
-            self.sock.settimeout(timeout)
-            buffer = b""
-            start_time = asyncio.get_event_loop().time()
-            while True:
-                if asyncio.get_event_loop().time() - start_time > timeout:
-                     raise socket.timeout("Timeout waiting for Houdini response")
-
-                chunk = self.sock.recv(recv_size)
-                if not chunk:
-                    if buffer:
-                         raise ConnectionAbortedError("Connection closed by Houdini with incomplete data.")
-                    else:
-                         raise ConnectionAbortedError("Connection closed by Houdini before sending data.")
-
-                buffer += chunk
-                try:
-                    decoded_string = buffer.decode("utf-8")
-                    parsed = json.loads(decoded_string)
-                    logger.info(f"Received response from Houdini: {parsed}")
-                    return parsed
-                except json.JSONDecodeError:
+        for attempt in (1, 2):
+            if not self.connect():
+                error_msg = f"Could not connect to Houdini on port {self.port}."
+                logger.error(error_msg)
+                return {"status": "error", "message": error_msg, "origin": "mcp_server_connection"}
+            try:
+                self.sock.settimeout(30.0)
+                self.sock.sendall(protocol.encode(command))
+                self.last_command_at = _time.monotonic()
+                self.command_count += 1
+                logger.info(f"Sent command to Houdini: {command}")
+                return protocol.receive(self.sock)
+            except socket.timeout:
+                error_msg = "Timeout receiving data from Houdini."
+                logger.error(error_msg)
+                self.disconnect()
+                return {"status": "error", "message": error_msg,
+                        "origin": "mcp_server_send_command_timeout"}
+            except OSError as error:
+                self.disconnect()
+                if attempt == 1:
+                    logger.info(f"Connection to Houdini lost ({error}); connecting again.")
                     continue
-                except UnicodeDecodeError:
-                     logger.error("Received non-UTF-8 data from Houdini")
-                     raise ValueError("Received non-UTF-8 data from Houdini")
-
-        except socket.timeout:
-            error_msg = "Timeout receiving data from Houdini."
-            logger.error(error_msg)
-            self.disconnect()
-            return {"status": "error", "message": error_msg, "origin": "mcp_server_send_command_timeout"}
-        except Exception as e:
-            error_msg = f"Error during Houdini communication for command '{cmd_type}': {str(e)}"
-            logger.error(error_msg)
-            self.disconnect()
-            return {"status": "error", "message": error_msg, "origin": "mcp_server_send_command"}
+                error_msg = f"Error during Houdini communication for command '{cmd_type}': {error}"
+                logger.error(error_msg)
+                return {"status": "error", "message": error_msg, "origin": "mcp_server_send_command"}
 
 
 # ---- Headless hython management ----

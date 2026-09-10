@@ -9,7 +9,6 @@ Usage:
 
 Environment variables:
     HOUDINI_PATH       Path to Houdini executable (e.g. /opt/hfs20.0/bin/houdini)
-    HOUDINIMCP_PORT    TCP port for plugin communication (default: 9876)
     HOUDINIMCP_HIP     Optional .hip file to open on launch
 """
 import os
