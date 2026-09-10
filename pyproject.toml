@@ -5,7 +5,7 @@ description = "MCP bridge connecting SideFX Houdini to Claude AI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.12",
+    "mcp[cli]>=2.2",
 ]
 
 # The repository URL lives here. Everything that needs it reads it from here,
@@ -18,10 +18,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/houdinimcp"]
+packages = ["src/houdinimcp", "src/bridge"]
+
+# The docs tool reads this module, and it lives in the repository root until the
+# documentation engine replaces it.
+[tool.hatch.build.targets.wheel.force-include]
+"houdini_docs.py" = "houdini_docs.py"
 
 [project.scripts]
-houdinimcp-bridge = "houdini_mcp_server:main"
+houdinimcp-bridge = "bridge.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
