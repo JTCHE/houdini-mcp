@@ -28,32 +28,64 @@ def get_parameter(node_path, parm_name):
     return result
 
 
+def _write(node, parm_name, value):
+    """Write one parameter and report what really happened.
+
+    Houdini keeps a parameter that carries an expression: the write is accepted
+    and the value does not change. A keyframed parameter takes the value as a
+    new key. Both look like success to the caller, so the result says which
+    happened and whether the value took.
+    """
+    parm = node.parm(parm_name)
+    if not parm:
+        return {"parm": parm_name, "applied": False, "reason": "no such parameter"}
+    report = {"parm": parm_name, "old": parm.eval()}
+    expression = None
+    try:
+        expression = parm.expression()
+    except hou.OperationFailed:
+        pass
+    keyframes = parm.keyframes()
+    try:
+        parm.set(value)
+    except hou.PermissionError as error:
+        return {**report, "applied": False, "reason": f"locked: {error}"}
+    report["new"] = parm.eval()
+    report["applied"] = report["new"] == value
+    if expression:
+        report["expression"] = expression
+        report["reason"] = ("the parameter carries an expression, which still decides the "
+                            "value. Remove it with mode 'revert', or write the expression.")
+    elif keyframes:
+        report["keyframes"] = len(parm.keyframes())
+        report["reason"] = "the parameter is animated: the value became a new key."
+    elif not report["applied"]:
+        report["reason"] = "Houdini kept another value. The parameter may be a menu or a range."
+    return report
+
+
 def set_parameter(node_path, parm_name, value):
     """Set a single parameter value."""
     node = hou.node(node_path)
     if not node:
         raise ValueError(f"Node not found: {node_path}")
-    parm = node.parm(parm_name)
-    if not parm:
+    report = _write(node, parm_name, value)
+    if report.get("reason") == "no such parameter":
         raise ValueError(f"Parameter not found: {parm_name} on {node_path}")
-    old_value = parm.eval()
-    parm.set(value)
-    return {"path": node_path, "parm": parm_name, "old_value": old_value, "new_value": parm.eval()}
+    return {"path": node_path, **report}
 
 
 def set_parameters(node_path, parameters):
-    """Set multiple parameters at once."""
+    """Set several parameters. Names that do not exist come back in the result."""
     node = hou.node(node_path)
     if not node:
         raise ValueError(f"Node not found: {node_path}")
-    changes = []
-    for parm_name, value in parameters.items():
-        parm = node.parm(parm_name)
-        if parm:
-            old_value = parm.eval()
-            parm.set(value)
-            changes.append({"parm": parm_name, "old": old_value, "new": parm.eval()})
-    return {"path": node_path, "changes": changes}
+    changes = [_write(node, name, value) for name, value in parameters.items()]
+    return {
+        "path": node_path,
+        "changes": changes,
+        "not_applied": [change["parm"] for change in changes if not change["applied"]],
+    }
 
 
 def get_parameter_schema(node_path):
