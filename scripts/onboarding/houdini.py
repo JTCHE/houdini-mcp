@@ -33,14 +33,43 @@ def _version_key(version: str):
 
 
 def prefs_dir_for(release: str) -> str:
-    """The user preferences directory Houdini uses for a release, e.g. '22.0'."""
-    home = os.path.expanduser("~")
+    """The user preferences directory Houdini uses for a release, e.g. '22.0'.
+
+    Houdini puts the directory under $HOME. On Windows $HOME is often not set,
+    and then Houdini uses the Documents folder. Python's expanduser reads
+    USERPROFILE first, so it cannot answer this.
+    """
+    explicit = os.environ.get("HOUDINI_USER_PREF_DIR")
+    if explicit:
+        return explicit
+    home = os.environ.get("HOME")
     system = platform.system()
     if system == "Windows":
-        return os.path.join(home, "Documents", f"houdini{release}")
+        base = home or os.path.join(os.path.expanduser("~"), "Documents")
+        return os.path.join(base, f"houdini{release}")
+    home = home or os.path.expanduser("~")
     if system == "Darwin":
         return os.path.join(home, "Library", "Preferences", "houdini", release)
     return os.path.join(home, f"houdini{release}")
+
+
+def python_libs(prefs_dir: str, install=None) -> str | None:
+    """The name of Houdini's Python library directory, e.g. 'python3.13libs'.
+
+    Houdini runs a startup script from this directory only, and the name holds
+    the Python release, which changes between Houdini releases. The install
+    holds the true name; the preferences directory holds it after a first run.
+    """
+    roots = []
+    if install and install.executable:
+        hfs = os.path.dirname(os.path.dirname(install.executable))
+        roots.append(os.path.join(hfs, "houdini"))
+    roots.append(prefs_dir)
+    for root in roots:
+        found = sorted(glob.glob(os.path.join(root, "python3*libs")))
+        if found:
+            return os.path.basename(found[-1])
+    return None
 
 
 def _executable_name() -> str:

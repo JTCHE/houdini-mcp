@@ -175,14 +175,22 @@ def main():
 
     tui.title("Houdini plugin")
     if prefs_dir:
-        try:
-            summary["plugin"] = plugin.install(prefs_dir, REPO_DIR, args.dry_run)
-            for line in summary["plugin"]["wrote"]:
-                tui.step(line)
-            tui.ok(f"Plugin installed into {prefs_dir}")
-        except OSError as error:
+        match = next((install for install in installs if install.prefs_dir == prefs_dir), None)
+        python_libs = houdini.python_libs(prefs_dir, match)
+        if not python_libs:
+            error = (f"cannot find the Python library directory of the Houdini that uses "
+                     f"{prefs_dir}. Install that Houdini release, or start it once.")
             summary["errors"].append(f"plugin: {error}")
             tui.fail(f"Plugin install failed: {error}")
+        else:
+            try:
+                summary["plugin"] = plugin.install(prefs_dir, REPO_DIR, python_libs, args.dry_run)
+                for line in summary["plugin"]["wrote"]:
+                    tui.step(line)
+                tui.ok(f"Plugin installed into {prefs_dir}")
+            except OSError as error:
+                summary["errors"].append(f"plugin: {error}")
+                tui.fail(f"Plugin install failed: {error}")
     else:
         tui.warn("Skipped — run again with --houdini-version once Houdini is installed")
 

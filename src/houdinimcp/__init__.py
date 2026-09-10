@@ -1,29 +1,34 @@
-import os
-import hou
-from .server import HoudiniMCPServer
+"""The HoudiniMCP plugin, which runs inside Houdini.
+
+A GUI session starts the server from `uiready.py`, which the installer writes.
+A headless session starts it from `scripts/runtime/headless_server.py`.
+
+This module must import without `hou`: the bridge imports `houdinimcp.protocol`
+from its own venv, outside Houdini.
+"""
+
 
 def start_server():
-    if not hasattr(hou.session, "houdinimcp_server") or hou.session.houdinimcp_server is None:
-        hou.session.houdinimcp_server = HoudiniMCPServer()
-        hou.session.houdinimcp_server.start()
-    else:
-        print("Houdini MCP Server is already running.")
+    """Start the TCP server and keep it on hou.session."""
+    import hou
+    from .server import HoudiniMCPServer
+
+    if getattr(hou.session, "houdinimcp_server", None):
+        print("HoudiniMCP server is already running.")
+        return hou.session.houdinimcp_server
+    server = HoudiniMCPServer()
+    server.start()
+    hou.session.houdinimcp_server = server
+    return server
+
 
 def stop_server():
-    if hasattr(hou.session, "houdinimcp_server") and hou.session.houdinimcp_server:
-        hou.session.houdinimcp_server.stop()
-        hou.session.houdinimcp_server = None
-    else:
-        print("Houdini MCP Server is not running.")
+    """Stop the TCP server if it runs."""
+    import hou
 
-# Optionally auto-start
-def initialize_plugin():
-    # Set up default session toggles if desired
-    if not hasattr(hou.session, "houdinimcp_use_assetlib"):
-        hou.session.houdinimcp_use_assetlib = False
-    # Auto-start server if you want:
-    start_server()
-
-# Auto-load on import (skipped for headless — managed by headless_server.py)
-if not os.environ.get("HOUDINIMCP_HEADLESS"):
-    initialize_plugin()
+    server = getattr(hou.session, "houdinimcp_server", None)
+    if not server:
+        print("HoudiniMCP server is not running.")
+        return
+    server.stop()
+    hou.session.houdinimcp_server = None
