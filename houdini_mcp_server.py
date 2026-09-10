@@ -290,49 +290,19 @@ def get_houdini_connection() -> HoudiniConnection:
 
 # Now define the MCP server that Claude will talk to over stdio
 mcp = FastMCP("HoudiniMCP", instructions="""\
-IMPORTANT — Houdini MCP Connection Rules:
+Houdini fails without an error more often than it fails with one. These five
+facts cause most wrong results.
 
-1. **Never rapid-fire commands.** Wait at least 1 second between consecutive tool calls.
-   The Houdini plugin uses a single-threaded listener and needs time to reset between connections.
-
-2. **Separate scene commands from render commands.** Do all scene setup (create nodes,
-   modify parameters, set materials, connect nodes, etc.) FIRST. Then call render tools
-   in a separate step.
-
-3. **Render commands are slow.** Rendering takes significantly longer than node operations.
-   Do not assume a render has failed just because it takes time.
-
-4. **If you get a connection error, STOP.** Do not retry in a loop — you likely crashed
-   the plugin. Tell the user to restart the Houdini MCP plugin and verify the port is
-   listening before trying again.
-
-5. **Verify connectivity first.** Use the `ping` tool before starting work to confirm
-   the Houdini plugin is reachable. If ping fails, tell the user immediately.
-
-6. **Render workflow:** Render tools save images to disk (in /tmp/ by default) and return
-   the file path. Use the Read tool to view the rendered image directly, or tell the user
-   the file path.
-
-7. **Use batch for bulk operations.** When creating multiple nodes or making many
-   changes at once, prefer the `batch` tool over individual calls. This executes
-   atomically in a single undo group and avoids rapid-fire connection issues.
-
-8. **Monitor long renders.** After launching a Karma or Mantra render, use
-   `monitor_render` to poll for `husk` / `mantra-bin` processes and check if
-   the output file exists. No Houdini connection needed.
-
-9. **Confirm the API before you call it.** Houdini changes method names and enum
-   members between releases, and a wrong name fails silently. The `docs` tool
-   reads the official documentation from HoudiniMD (houdinimd.com): search it
-   with `query`, read a page with `page`, read a scene node's own page with
-   `node`. Read the page before you use a node, parameter, VEX function or HOM
-   call you have not verified in this session. Do not answer from memory, and
-   do not scrape sidefx.com. Use `execute_houdini_code` with `dir()` to confirm
-   a symbol exists in the running session.
-
-10. **Expect silent failures.** A mismatched name or an active expression gives a
-   wrong result and no error. Read back what you set, and check `find_error_nodes`
-   before you report success.
+1. A parameter write has no effect when the parameter carries an expression or
+   a keyframe. The write reports success. Read the value back.
+2. A node name gets a numeric suffix when the name is already used. Keep the
+   path that the create call returned. Do not look the node up by the name you
+   asked for.
+3. A cook error hides behind an empty geometry result. Read `node.errors()`.
+4. The display flag and the render flag are different flags.
+5. Inspect before you assume. Confirm a node type, a parameter name, a VEX
+   function or a `hou` call with the `docs` tool or in the live session. Do not
+   answer from memory about the Houdini API.
 """)
 
 @asynccontextmanager

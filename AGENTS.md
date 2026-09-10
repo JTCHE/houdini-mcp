@@ -23,3 +23,9 @@ Project information: @README.md
   inventories, status tables, audit results. Point to the code that holds it.
 - Do not add a file to this repo unless the product needs it. Scratch work goes
   in a temporary directory.
+- Do not commit or publish SideFX content or any other copyrighted material.
+  This includes help pages, images from the Houdini install, and test fixtures
+  made from them. Make a fixture on the machine that runs the test.
+- Look at the change in a live Houdini before you report it done. Code that
+  imports is not a plugin that answers. See [Deployment](agents/deployment.md):
+  Houdini runs a copy, so run the installer and restart Houdini first.

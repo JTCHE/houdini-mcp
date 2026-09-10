@@ -4,8 +4,12 @@ The `hou` module is the authority. Your memory of it is not.
 
 Houdini changes method names, enum members, and node categories between
 releases. Confirm a symbol exists before you call it: read the object with
-`dir()`, or query the live session. Do not add a version check — the code must
-run against the Houdini that the user has.
+`dir()`, or query the live session.
+
+The product supports Houdini 21.0 and 22.0. Add a version conditional only
+where the behaviour is genuinely different. Keep it in one place inside the
+tool that needs it, and name the releases it covers in a comment. A version
+check that guards a symbol you did not confirm is a guess, not a fix.
 
 Do not record API facts in this repo. Facts about one release go stale. Use the
 `docs` tool for reference, and the live session for truth.
