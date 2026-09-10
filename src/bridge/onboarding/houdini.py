@@ -32,25 +32,69 @@ def _version_key(version: str):
     return tuple(int(part) for part in re.findall(r"\d+", version)) or (0,)
 
 
+def _user_env(name: str) -> str | None:
+    """A variable of the environment the Houdini GUI starts with.
+
+    On Windows that is the user's environment in the registry, not this
+    process's: Git Bash sets HOME for itself, and a Houdini started from the
+    Start menu never sees it.
+    """
+    if platform.system() != "Windows":
+        return os.environ.get(name)
+    import winreg
+    for hive, key in ((winreg.HKEY_CURRENT_USER, "Environment"),
+                      (winreg.HKEY_LOCAL_MACHINE,
+                       r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(hive, key) as handle:
+                return os.path.expandvars(winreg.QueryValueEx(handle, name)[0])
+        except OSError:
+            continue
+    return None
+
+
+def _documents() -> str:
+    """The Windows Documents folder, which OneDrive can move."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as handle:
+            return os.path.expandvars(winreg.QueryValueEx(handle, "Personal")[0])
+    except OSError:
+        return os.path.join(os.path.expanduser("~"), "Documents")
+
+
 def prefs_dir_for(release: str) -> str:
     """The user preferences directory Houdini uses for a release, e.g. '22.0'.
 
-    Houdini puts the directory under $HOME. On Windows $HOME is often not set,
-    and then Houdini uses the Documents folder. Python's expanduser reads
-    USERPROFILE first, so it cannot answer this.
+    Houdini puts the directory under $HOME. On Windows $HOME is usually not
+    set, and then Houdini uses the Documents folder.
     """
-    explicit = os.environ.get("HOUDINI_USER_PREF_DIR")
+    explicit = _user_env("HOUDINI_USER_PREF_DIR")
     if explicit:
         return explicit
-    home = os.environ.get("HOME")
+    home = _user_env("HOME")
     system = platform.system()
     if system == "Windows":
-        base = home or os.path.join(os.path.expanduser("~"), "Documents")
-        return os.path.join(base, f"houdini{release}")
+        return os.path.join(home or _documents(), f"houdini{release}")
     home = home or os.path.expanduser("~")
     if system == "Darwin":
         return os.path.join(home, "Library", "Preferences", "houdini", release)
     return os.path.join(home, f"houdini{release}")
+
+
+def install_for(prefs_dir: str, installs: list):
+    """The install that reads a prefs directory: the one whose own directory it
+    is, or else the one of the release the directory is named for, so a
+    `--prefs-dir` given by hand still finds its Houdini."""
+    def same(path):
+        return os.path.normcase(os.path.normpath(path))
+    for install in installs:
+        if same(install.prefs_dir) == same(prefs_dir):
+            return install
+    named = re.search(r"(\d+\.\d+)$", same(prefs_dir))
+    return next((install for install in installs
+                 if named and install.release == named.group(1) and install.executable), None)
 
 
 def python_libs(prefs_dir: str, install=None) -> str | None:

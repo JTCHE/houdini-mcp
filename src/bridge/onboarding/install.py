@@ -185,7 +185,7 @@ def main():
 
     tui.title("Houdini plugin")
     if prefs_dir:
-        match = next((install for install in installs if install.prefs_dir == prefs_dir), None)
+        match = houdini.install_for(prefs_dir, installs)
         python_libs = houdini.python_libs(prefs_dir, match)
         if not python_libs:
             error = (f"cannot find the Python library directory of the Houdini that uses "
