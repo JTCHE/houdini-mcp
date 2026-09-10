@@ -19,7 +19,6 @@ for site_packages in (os.path.join(SCRIPT_DIR, ".venv", "Lib", "site-packages"),
         break
 
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "src"))
-sys.path.insert(0, SCRIPT_DIR)
 
 from bridge.cli import main  # noqa: E402
 
