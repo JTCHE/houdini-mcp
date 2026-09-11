@@ -131,13 +131,15 @@ def capture_screenshot(output_path=None):
         output_path = os.path.join(tempfile.gettempdir(), "mcp_screenshot.png")
     # hou.GeometryViewport has no image export (21.0 and 22.0), so write a
     # one-frame flipbook of the current frame. A path without $F is kept as it is.
+    # An image left by an earlier call must not pass for this one.
+    before = os.path.getmtime(output_path) if os.path.exists(output_path) else None
     frame = hou.frame()
     settings = viewer.flipbookSettings().stash()
     settings.frameRange((frame, frame))
     settings.output(output_path)
     settings.outputToMPlay(False)
     viewer.flipbook(viewer.curViewport(), settings)
-    if not os.path.exists(output_path):
+    if not os.path.exists(output_path) or os.path.getmtime(output_path) == before:
         raise RuntimeError(f"The flipbook wrote no image at {output_path}")
     return {"filepath": output_path}
 
