@@ -1,6 +1,6 @@
 [project]
 name = "houdinimcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for SideFX Houdini: 20 tools, honest failures, version-exact documentation"
 readme = "README.md"
 requires-python = ">=3.10"
