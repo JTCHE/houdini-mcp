@@ -24,3 +24,7 @@ hip_patterns_index.json
 
 # agent environment-specific 
 .claude
+
+# generally ignore hidden files and directories except for .gitignore
+.*
+!.gitignore
