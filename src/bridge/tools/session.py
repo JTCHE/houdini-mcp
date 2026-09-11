@@ -1,11 +1,11 @@
-"""session — is Houdini there, and start or stop a headless one."""
+"""session — is Houdini there, and start or stop one."""
 import json
 
-from ..connection import HoudiniError, call, start_headless, status, stop_headless
+from ..connection import HoudiniError, call, start_gui, start_headless, status, stop_headless
 
 
-def tool(action: str = "status") -> str:
-    """Report the Houdini session, or start or stop a headless one.
+def tool(action: str = "status", hip: str = None) -> str:
+    """Report the Houdini session, or start or stop one.
 
     Use it first when a tool says that Houdini is not reachable, and use it to
     learn the Houdini version before you use an API that changed between
@@ -19,8 +19,14 @@ def tool(action: str = "status") -> str:
                    Starts nothing.
         "start"  — start a headless Houdini (hython) and wait for it to answer.
                    Does nothing when a Houdini already listens.
+        "start_gui" — start Houdini with its window and wait for the plugin to
+                   answer, up to 4 minutes. It opens the .hip file at `hip`
+                   when you give one. It stays open when the bridge stops. Use
+                   it when you need the viewport, and do not start Houdini
+                   from a shell yourself: a shell can give it other prefs.
         "stop"   — stop the headless Houdini that this bridge started. A
-                   Houdini that you started yourself is not touched.
+                   Houdini that you started yourself, or with "start_gui", is
+                   not touched.
 
     Returns JSON. On "status" the report says what to do next when nothing
     listens on the port.
@@ -28,10 +34,12 @@ def tool(action: str = "status") -> str:
     report = status()
     if action == "start":
         report["action"] = start_headless()
+    elif action == "start_gui":
+        report["action"] = start_gui(hip)
     elif action == "stop":
         report["action"] = stop_headless()
     elif action != "status":
-        return f"Unknown action '{action}'. Use 'status', 'start' or 'stop'."
+        return f"Unknown action '{action}'. Use 'status', 'start', 'start_gui' or 'stop'."
 
     if report["port_is_listening"]:
         try:

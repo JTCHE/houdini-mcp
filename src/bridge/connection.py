@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from houdinimcp import protocol
 
 logger = logging.getLogger("HoudiniMCP.bridge")
@@ -27,10 +29,12 @@ _connection = None
 _hython = None
 
 
-class HoudiniError(RuntimeError):
+class HoudiniError(ToolError):
     """Houdini could not be reached, or it refused the command.
 
     The message says what to do next. Show it to the user as it is.
+    It is a ToolError because the MCP SDK hides the text of any other exception
+    and sends only "Error executing tool <name>".
     """
 
 
@@ -165,6 +169,36 @@ def port_is_listening(port: int = None, host: str = "localhost") -> bool:
         return False
 
 
+def houdini_env() -> dict:
+    """The environment of a Houdini that the bridge starts.
+
+    On Windows it names the prefs directory of a Houdini started from the Start
+    menu. Without that, a bridge started from a shell that sets HOME (Git Bash
+    does) gives Houdini $HOME/houdiniX.Y: other prefs, no plugin, and a stray
+    directory. Houdini puts the release in place of __HVER__.
+    """
+    from .onboarding.houdini import prefs_dir_for
+    environment = os.environ.copy()
+    environment["HOUDINIMCP_PORT"] = str(PORT)
+    if os.name == "nt" and not environment.get("HOUDINI_USER_PREF_DIR"):
+        environment["HOUDINI_USER_PREF_DIR"] = prefs_dir_for("__HVER__")
+    return environment
+
+
+def _wait_for_port(process: subprocess.Popen, wait_seconds: float) -> bool:
+    """Wait until the port listens. False when the time runs out; raises when
+    the process stops first."""
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            output = process.stdout.read().decode(errors="replace")[-800:] if process.stdout else ""
+            raise HoudiniError(f"Houdini stopped before it could listen:\n{output}")
+        if port_is_listening():
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def start_headless(wait_seconds: float = 90.0) -> str:
     """Start a headless Houdini and wait for it to listen. Returns what happened."""
     global _hython
@@ -174,22 +208,43 @@ def start_headless(wait_seconds: float = 90.0) -> str:
     if not hython:
         raise HoudiniError("No hython was found. Set HFS to a Houdini install, or start "
                            "Houdini yourself.")
-    environment = os.environ.copy()
-    environment["HOUDINIMCP_PORT"] = str(PORT)
-    _hython = subprocess.Popen([hython, HEADLESS_SCRIPT], env=environment,
+    _hython = subprocess.Popen([hython, HEADLESS_SCRIPT], env=houdini_env(),
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    deadline = time.monotonic() + wait_seconds
-    while time.monotonic() < deadline:
-        if _hython.poll() is not None:
-            output = _hython.stdout.read().decode(errors="replace")[-800:]
-            _hython = None
-            raise HoudiniError(f"hython stopped before it could listen:\n{output}")
-        if port_is_listening():
+    try:
+        if _wait_for_port(_hython, wait_seconds):
             return f"Headless Houdini is ready on port {PORT}."
-        time.sleep(0.5)
+    except HoudiniError:
+        _hython = None
+        raise
     stop_headless()
     raise HoudiniError(f"hython did not listen within {wait_seconds:.0f} seconds. "
                        f"Houdini may want a license. Start Houdini yourself and try again.")
+
+
+def start_gui(hip: str = None, wait_seconds: float = 240.0) -> str:
+    """Start Houdini with its window, apart from the bridge, and wait for the
+    plugin to listen. The bridge does not stop it. hip is a file to open."""
+    if port_is_listening():
+        return "A Houdini already listens on the port."
+    hython = find_hython()
+    houdini = hython and os.path.join(os.path.dirname(hython),
+                                      "houdini.exe" if os.name == "nt" else "houdini")
+    if not houdini or not os.path.isfile(houdini):
+        raise HoudiniError("No Houdini was found. Set HFS to a Houdini install, or start "
+                           "Houdini yourself.")
+    if hip and not os.path.isfile(hip):
+        raise HoudiniError(f"There is no file at {hip}.")
+    detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+              if os.name == "nt" else {"start_new_session": True})
+    process = subprocess.Popen([houdini] + ([hip] if hip else []), env=houdini_env(),
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, **detach)
+    if _wait_for_port(process, wait_seconds):
+        return f"Houdini {houdini} is ready on port {PORT}."
+    raise HoudiniError(f"Houdini started, but nothing listened on port {PORT} within "
+                       f"{wait_seconds:.0f} seconds. It may still load, or want a license, "
+                       f"or the plugin is not installed: run houdinimcp-install. Look at the "
+                       f"window, then call session with action='status'.")
 
 
 def stop_headless() -> str:

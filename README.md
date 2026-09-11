@@ -93,7 +93,9 @@ macOS, `.\bootstrap.bat --yes` on Windows.
 
 Useful flags: `--houdini-version none` skips the plugin, `--prefs-dir` names the
 Houdini preferences directory outright, `--harness none` leaves every client
-alone, `--skip-deps` skips `uv sync` in a clone.
+alone, `--skip-deps` skips `uv sync` in a clone, `--quiet-start` stops the
+usage statistics dialog and the Start Here window that cover the viewport on
+a first launch (it adds `HOUDINI_NO_START_PAGE_SPLASH = 1` to `houdini.env`).
 
 With `--json`, stdout carries the JSON report and nothing else — the progress
 log goes to stderr. The report names every file written and every client
@@ -138,6 +140,13 @@ stops the TCP server.
 
 Headless mode gives you every tool except the ones that need a UI: viewport,
 screenshots and flipbooks. Set `HOUDINIMCP_NO_HEADLESS=1` to turn auto-launch off.
+For those, `session` with `action="start_gui"` starts Houdini with its window
+(and `hip=` opens a file), then waits for the plugin.
+
+On Windows, a Houdini that the bridge starts reads the same preferences as one
+started from the Start menu: the bridge sets `HOUDINI_USER_PREF_DIR` when it is
+not set. A shell that sets `HOME` (Git Bash does) otherwise sends Houdini to
+`$HOME\houdiniX.Y`.
 
 ## Contributing
 

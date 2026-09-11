@@ -7,6 +7,10 @@ from urllib.parse import parse_qsl
 
 from ..connection import call
 
+# Characters in one answer. A client drops a tool result much longer than this,
+# and hou.Geometry alone is 140,000.
+LIMIT = 20_000
+
 # hou node category name -> documentation folder, where the two differ.
 CATEGORY_TO_DIR = {
     "Object": "obj",
@@ -19,7 +23,8 @@ CATEGORY_TO_DIR = {
 
 
 def tool(query: str = None, page: str = None, node: str = None,
-         category: str = None, limit: int = 5, build: str = None) -> str:
+         category: str = None, limit: int = 5, build: str = None,
+         section: str = None, part: int = 1) -> str:
     """Read the official Houdini documentation.
 
     This is the authority on every node, parameter, VEX function and HOM call.
@@ -49,6 +54,12 @@ def tool(query: str = None, page: str = None, node: str = None,
     build: read a specific Houdini build, for example "21.0.829". Default: the
     Houdini in $HFS, then the newest build on this machine.
 
+    section: read only the part of a page under one heading, for example
+    "Quick renders and flipbooks". A long page lists its headings.
+
+    part: a long page comes in parts of about 20,000 characters. Read the next
+    one with part=2, 3 and so on.
+
     Returns markdown for a page, JSON for a search.
     """
     given = [name for name, value in
@@ -65,7 +76,7 @@ def tool(query: str = None, page: str = None, node: str = None,
             type_name, node_category = meta.get("type_name", ""), meta.get("category", "")
             path = node_page(type_name, node_category, meta.get("default_help_url"))
             try:
-                return read(docs, path, build)
+                return excerpt(read(docs, path, build), section, part)
             except ValueError:
                 # An asset can carry a help address that has no page, and a
                 # version can lack a page of its own. Try the bare type name,
@@ -73,8 +84,8 @@ def tool(query: str = None, page: str = None, node: str = None,
                 plain = f"nodes/{node_folder(node_category)}/{type_base_name(type_name)}"
                 if plain == path:
                     raise
-                return read(docs, plain, build)
-        return read(docs, page, build)
+                return excerpt(read(docs, plain, build), section, part)
+        return excerpt(read(docs, page, build), section, part)
     except ImportError:
         return "Error: the documentation engine is not installed. Run: uv pip install houdinimd-docs"
     except (ValueError, RuntimeError) as error:
@@ -193,6 +204,56 @@ def node_page(type_name: str, category: str, help_url: str = None) -> str:
     return f"nodes/{node_folder(category)}/{page}"
 
 
+def heading(line: str):
+    """(level, title) when the line is a heading, in markdown ('## Methods')
+    or in HTML ('<h3 id="methods">Methods</h3>'), else None."""
+    match = re.match(r"(#{2,4}) +(.+)", line)
+    if match:
+        return len(match.group(1)), match.group(2).strip()
+    match = re.match(r"\s*<h([2-4])\b[^>]*>(.*?)</h\1>", line)
+    if match:
+        return int(match.group(1)), re.sub(r"<[^>]+>", "", match.group(2)).strip()
+    return None
+
+
+def excerpt(text: str, section: str = None, part: int = 1) -> str:
+    """One answer's worth of a page: the sections whose heading holds
+    `section`, cut into parts of at most LIMIT characters at line ends."""
+    lines = text.splitlines(keepends=True)
+    marks = [(index, found) for index, found in
+             ((index, heading(line)) for index, line in enumerate(lines)) if found]
+    headings = [title for _, (_, title) in marks]
+    if section:
+        found = []
+        for number, (start, (level, title)) in enumerate(marks):
+            if section.lower() in title.lower():
+                # A section runs to the next heading of its own level or above.
+                end = next((index for index, (other, _) in marks[number + 1:] if other <= level),
+                           len(lines))
+                found.append("".join(lines[start:end]))
+        if not found:
+            return f"Error: no section '{section}'. Sections: {'; '.join(headings)}"
+        text = "\n".join(found)
+
+    # ponytail: one line longer than LIMIT stays whole. Cut inside the line if
+    # a page ever carries one.
+    parts, current = [], ""
+    for line in text.splitlines(keepends=True):
+        if current and len(current) + len(line) > LIMIT:
+            parts.append(current)
+            current = ""
+        current += line
+    parts.append(current)
+
+    if len(parts) == 1:
+        return text
+    if not 1 <= part <= len(parts):
+        return f"Error: part must be 1 to {len(parts)}."
+    where = (f"Read the next with part={part + 1}" if part < len(parts) else "This is the last part")
+    return (parts[part - 1].rstrip() + f"\n\n---\nPart {part} of {len(parts)}. {where}, "
+            f"or one section with section=. Sections: {'; '.join(headings)}.")
+
+
 if __name__ == "__main__":
     assert node_page("labs::edge_damage::2.0", "Sop") == "nodes/sop/labs--edge_damage-2.0"
     assert node_page("attribwrangle", "Sop") == "nodes/sop/attribwrangle"
@@ -202,4 +263,20 @@ if __name__ == "__main__":
     assert node_page("x", "Sop", "operator:Sop/copytopoints?version=2.0") == "nodes/sop/copytopoints-2.0"
     assert node_page("x", "Sop", "https://www.sidefx.com/docs/houdini/nodes/sop/box.html") == "nodes/sop/box"
     assert type_base_name("labs::edge_damage::2.0") == "edge_damage"
+    page = "# T\n\nintro\n\n## Alpha\n\n" + "a line\n" * 4000 + "## Beta\n\nb\n"
+    assert excerpt("short") == "short"
+    first = excerpt(page)
+    assert len(first) < LIMIT + 500 and "Part 1 of 2. Read the next with part=2" in first
+    assert "This is the last part" in excerpt(page, part=2)
+    assert excerpt(page, section="beta") == "## Beta\n\nb\n"
+    assert excerpt(page, section="gamma").startswith("Error: no section 'gamma'. Sections: Alpha; Beta")
+    assert excerpt(page, part=3) == "Error: part must be 1 to 2."
+    # houdinimd.com writes a class page's headings as HTML, and an empty
+    # section is two headings in a row.
+    html = ('# C\n\n<h2 id="m">Methods</h2>\n\n<h3 id="a">Memories</h3>\n'
+            '<h3 id="q">Quick renders and <code>flipbooks</code></h3>\n\nflip\n\n<h3>Window</h3>\nw\n')
+    assert excerpt(html, section="quick renders") == '<h3 id="q">Quick renders and <code>flipbooks</code></h3>\n\nflip\n\n'
+    assert excerpt(html, section="memories") == '<h3 id="a">Memories</h3>\n'
+    assert excerpt(html, section="methods").endswith("w\n")
+    assert excerpt(html, section="nope").endswith("Methods; Memories; Quick renders and flipbooks; Window")
     print("ok")

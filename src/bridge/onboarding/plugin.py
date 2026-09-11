@@ -65,6 +65,30 @@ def install(prefs_dir: str, python_libs: str, dry_run: bool = False) -> dict:
     return {"prefs_dir": prefs_dir, "plugin_dir": module_dest, "wrote": log}
 
 
+QUIET_START = "HOUDINI_NO_START_PAGE_SPLASH"
+
+
+def quiet_start(prefs_dir: str, dry_run: bool = False) -> str:
+    """Stop the usage statistics dialog and the Start Here window that a new
+    prefs directory opens on the first launch. Both cover the viewport, so a
+    capture shows them instead of the scene. Adds one line to houdini.env and
+    keeps the rest of the file. Returns what it did."""
+    env_file = os.path.join(prefs_dir, "houdini.env")
+    text = ""
+    if os.path.isfile(env_file):
+        with open(env_file, encoding="utf-8", errors="replace", newline="") as handle:
+            text = handle.read()
+    if any(line.split("=")[0].strip() == QUIET_START for line in text.splitlines()):
+        return f"quiet start -> {env_file} (already set)"
+    if not dry_run:
+        newline = "\r\n" if "\r\n" in text or (not text and os.name == "nt") else "\n"
+        lead = "" if not text or text.endswith("\n") else newline
+        os.makedirs(prefs_dir, exist_ok=True)
+        with open(env_file, "a", encoding="utf-8", newline="") as handle:
+            handle.write(f"{lead}{QUIET_START} = 1{newline}")
+    return f"quiet start -> {env_file}"
+
+
 def _write(path: str, text: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:

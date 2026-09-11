@@ -47,6 +47,9 @@ def parse_args():
                         help="Release to install the plugin for, e.g. 22.0. 'none' skips the plugin")
     parser.add_argument("--prefs-dir", default=None,
                         help="Explicit Houdini preferences directory, instead of a release")
+    parser.add_argument("--quiet-start", action="store_true",
+                        help="Stop the usage statistics dialog and the Start Here window when "
+                             "Houdini starts: adds HOUDINI_NO_START_PAGE_SPLASH=1 to houdini.env")
     parser.add_argument("--harness", action="append", default=[], metavar="KEY",
                         help=f"Harness to configure, repeatable: {', '.join(harnesses.BY_KEY)}, all, none")
     parser.add_argument("--claude-permissions", dest="claude_permissions",
@@ -64,7 +67,7 @@ def parse_args():
 def choose_houdini(args, installs, asking):
     """Return the prefs directory to install into, or None to skip the plugin."""
     if args.prefs_dir:
-        return args.prefs_dir
+        return os.path.normpath(args.prefs_dir)
     if args.houdini_version == "none":
         return None
     if args.houdini_version:
@@ -148,7 +151,7 @@ def main():
 
     asking = tui.interactive() and not args.yes
     summary = {"repo_dir": REPO_DIR, "dry_run": args.dry_run,
-               "plugin": None, "harnesses": [], "errors": []}
+               "plugin": None, "harnesses": [], "errors": [], "warnings": []}
 
     tui.title("=== HoudiniMCP install ===")
     tui.say(f"  Repository: {REPO_DIR}" if REPO_DIR
@@ -185,7 +188,7 @@ def main():
 
     tui.title("Houdini plugin")
     if prefs_dir:
-        match = next((install for install in installs if install.prefs_dir == prefs_dir), None)
+        match = houdini.install_for(prefs_dir, installs)
         python_libs = houdini.python_libs(prefs_dir, match)
         if not python_libs:
             error = (f"cannot find the Python library directory of the Houdini that uses "
@@ -195,9 +198,24 @@ def main():
         else:
             try:
                 summary["plugin"] = plugin.install(prefs_dir, python_libs, args.dry_run)
+                if args.quiet_start:
+                    summary["plugin"]["wrote"].append(plugin.quiet_start(prefs_dir, args.dry_run))
                 for line in summary["plugin"]["wrote"]:
                     tui.step(line)
                 tui.ok(f"Plugin installed into {prefs_dir}")
+                # Git Bash sets HOME, and a Houdini started from it inherits that,
+                # unless HOUDINI_USER_PREF_DIR names the prefs directory.
+                shell_home = os.environ.get("HOME")
+                other = shell_home and os.path.join(shell_home, os.path.basename(os.path.normpath(prefs_dir)))
+                if os.name == "nt" and other and not os.environ.get("HOUDINI_USER_PREF_DIR") \
+                        and os.path.normcase(other) != os.path.normcase(os.path.normpath(prefs_dir)):
+                    note = (f"The plugin went into {prefs_dir}. A Houdini "
+                            f"started from this shell reads {other} instead, because the shell "
+                            f"sets HOME. The bridge does not have this problem. To fix it for "
+                            f"the shell, set the user variable HOUDINI_USER_PREF_DIR to "
+                            f"{houdini.prefs_dir_for('__HVER__')}.")
+                    summary["warnings"].append(note)
+                    tui.warn(note)
             except OSError as error:
                 summary["errors"].append(f"plugin: {error}")
                 tui.fail(f"Plugin install failed: {error}")

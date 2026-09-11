@@ -16,18 +16,28 @@ def list_panes():
     return {"count": len(panes), "panes": panes}
 
 
+def _shown_set(viewer):
+    """The display set of what the viewer shows. Inside a SOP network that is the
+    displayed SOP. In a LOP network (the stage) and at object level it is the
+    scene geometry; there the DisplayModel set changes nothing on screen."""
+    in_sops = viewer.pwd().childTypeCategory() == hou.sopNodeTypeCategory()
+    settype = hou.displaySetType.DisplayModel if in_sops else hou.displaySetType.SceneObject
+    return viewer.curViewport().settings().displaySet(settype)
+
+
 def get_viewport_info():
     """Get current viewport settings."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
     viewport = viewer.curViewport()
-    settings = viewport.settings()
+    in_lops = viewer.pwd().childTypeCategory() == hou.lopNodeTypeCategory()
     return {
         "name": viewport.name(),
         "type": str(viewport.type()),
         "camera": viewport.camera().path() if viewport.camera() else None,
-        "display_set": str(settings.displaySet()),
+        "shading": _shown_set(viewer).shadedMode().name(),
+        "renderer": viewer.currentHydraRenderer() if in_lops else None,
     }
 
 
@@ -60,9 +70,10 @@ def set_viewport_display(shading_mode=None, guide=None):
             "smooth_wire": hou.glShadingType.SmoothWire,
         }
         mode = mode_map.get(shading_mode)
-        if mode is not None:
-            settings.setDisplaySet(mode)
-            changes.append(f"shading={shading_mode}")
+        if mode is None:
+            raise ValueError(f"Unknown shading: {shading_mode}. Use: {list(mode_map)}")
+        _shown_set(viewer).setShadedMode(mode)
+        changes.append(f"shading={shading_mode}")
     if guide is not None:
         settings.enableGuide(hou.viewportGuide.NodeGuides, guide)
         changes.append(f"guides={'on' if guide else 'off'}")
@@ -70,13 +81,17 @@ def set_viewport_display(shading_mode=None, guide=None):
 
 
 def set_viewport_renderer(renderer):
-    """Set the viewport renderer (GL, Karma, etc.)."""
+    """Set the Hydra renderer of the scene viewer, for example "Karma CPU"
+    or "Houdini VK". It applies to a viewer that shows a LOP network."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
-    viewport = viewer.curViewport()
-    viewport.changeType(hou.geometryViewportType.__dict__.get(renderer, hou.geometryViewportType.Perspective))
-    return {"renderer": renderer}
+    available = viewer.hydraRenderers()
+    match = next((name for name in available if name.lower() == renderer.lower()), None)
+    if match is None:
+        raise ValueError(f"Unknown viewport renderer: {renderer}. Use one of: {list(available)}")
+    viewer.setHydraRenderer(match)
+    return {"renderer": viewer.currentHydraRenderer()}
 
 
 def frame_selection():
@@ -129,8 +144,18 @@ def capture_screenshot(output_path=None):
         raise RuntimeError("No scene viewer found")
     if not output_path:
         output_path = os.path.join(tempfile.gettempdir(), "mcp_screenshot.png")
-    viewport = viewer.curViewport()
-    viewport.saveAsImage(output_path)
+    # hou.GeometryViewport has no image export (21.0 and 22.0), so write a
+    # one-frame flipbook of the current frame. A path without $F is kept as it is.
+    # An image left by an earlier call must not pass for this one.
+    before = os.path.getmtime(output_path) if os.path.exists(output_path) else None
+    frame = hou.frame()
+    settings = viewer.flipbookSettings().stash()
+    settings.frameRange((frame, frame))
+    settings.output(output_path)
+    settings.outputToMPlay(False)
+    viewer.flipbook(viewer.curViewport(), settings)
+    if not os.path.exists(output_path) or os.path.getmtime(output_path) == before:
+        raise RuntimeError(f"The flipbook wrote no image at {output_path}")
     return {"filepath": output_path}
 
 
