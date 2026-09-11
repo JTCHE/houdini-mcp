@@ -16,18 +16,28 @@ def list_panes():
     return {"count": len(panes), "panes": panes}
 
 
+def _shown_set(viewer):
+    """The display set of what the viewer shows. Inside a SOP network that is the
+    displayed SOP. In a LOP network (the stage) and at object level it is the
+    scene geometry; there the DisplayModel set changes nothing on screen."""
+    in_sops = viewer.pwd().childTypeCategory() == hou.sopNodeTypeCategory()
+    settype = hou.displaySetType.DisplayModel if in_sops else hou.displaySetType.SceneObject
+    return viewer.curViewport().settings().displaySet(settype)
+
+
 def get_viewport_info():
     """Get current viewport settings."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
     viewport = viewer.curViewport()
-    displayed = viewport.settings().displaySet(hou.displaySetType.DisplayModel)
+    in_lops = viewer.pwd().childTypeCategory() == hou.lopNodeTypeCategory()
     return {
         "name": viewport.name(),
         "type": str(viewport.type()),
         "camera": viewport.camera().path() if viewport.camera() else None,
-        "shading": displayed.shadedMode().name(),
+        "shading": _shown_set(viewer).shadedMode().name(),
+        "renderer": viewer.currentHydraRenderer() if in_lops else None,
     }
 
 
@@ -62,7 +72,7 @@ def set_viewport_display(shading_mode=None, guide=None):
         mode = mode_map.get(shading_mode)
         if mode is None:
             raise ValueError(f"Unknown shading: {shading_mode}. Use: {list(mode_map)}")
-        settings.displaySet(hou.displaySetType.DisplayModel).setShadedMode(mode)
+        _shown_set(viewer).setShadedMode(mode)
         changes.append(f"shading={shading_mode}")
     if guide is not None:
         settings.enableGuide(hou.viewportGuide.NodeGuides, guide)
