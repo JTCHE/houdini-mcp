@@ -22,12 +22,12 @@ def get_viewport_info():
     if not viewer:
         raise RuntimeError("No scene viewer found")
     viewport = viewer.curViewport()
-    settings = viewport.settings()
+    displayed = viewport.settings().displaySet(hou.displaySetType.DisplayModel)
     return {
         "name": viewport.name(),
         "type": str(viewport.type()),
         "camera": viewport.camera().path() if viewport.camera() else None,
-        "display_set": str(settings.displaySet()),
+        "shading": displayed.shadedMode().name(),
     }
 
 
@@ -60,9 +60,10 @@ def set_viewport_display(shading_mode=None, guide=None):
             "smooth_wire": hou.glShadingType.SmoothWire,
         }
         mode = mode_map.get(shading_mode)
-        if mode is not None:
-            settings.setDisplaySet(mode)
-            changes.append(f"shading={shading_mode}")
+        if mode is None:
+            raise ValueError(f"Unknown shading: {shading_mode}. Use: {list(mode_map)}")
+        settings.displaySet(hou.displaySetType.DisplayModel).setShadedMode(mode)
+        changes.append(f"shading={shading_mode}")
     if guide is not None:
         settings.enableGuide(hou.viewportGuide.NodeGuides, guide)
         changes.append(f"guides={'on' if guide else 'off'}")
