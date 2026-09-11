@@ -1,7 +1,7 @@
 [project]
 name = "houdinimcp"
-version = "0.2.0"
-description = "MCP server for SideFX Houdini: 20 tools, honest failures, live documentation"
+version = "0.3.1"
+description = "MCP server for SideFX Houdini: 20 tools, honest failures, version-exact documentation"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp[cli]>=2.2",
+    "houdinimd-docs>=0.1",
 ]
 
 # The repository URL lives here. Everything that needs it reads it from here,
@@ -33,13 +34,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/houdinimcp", "src/bridge"]
 
-# The docs tool reads this module, and it lives in the repository root until the
-# documentation engine replaces it.
-[tool.hatch.build.targets.wheel.force-include]
-"houdini_docs.py" = "houdini_docs.py"
-
 [tool.hatch.build.targets.sdist]
-include = ["src", "houdini_docs.py", "houdini_mcp_server.py", "README.md",
+include = ["src", "houdini_mcp_server.py", "README.md",
            "LICENSE", "AGENTS.md", "agents", "bootstrap.sh", "bootstrap.bat"]
 
 [project.scripts]

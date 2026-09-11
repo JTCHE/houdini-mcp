@@ -30,8 +30,9 @@ headless `hython` session, so you can work without the UI.
   in [`src/bridge/tools/`](src/bridge/tools/).
 - **Honest failures** — a write that Houdini silently ignored is reported as
   such, and every error names the next action.
-- **Documentation** — the official Houdini docs, read live from
-  [HoudiniMD](https://houdinimd.com).
+- **Documentation** — the official Houdini docs for the exact build on this
+  machine, read out of the install by the [HoudiniMD](https://houdinimd.com)
+  engine. No network.
 
 ## Install
 
@@ -128,7 +129,7 @@ stdio-to-HTTP proxy in front of it and expose that with a tunnel.
 
 ```
 MCP client ──stdio──> src/bridge/ ──TCP──> src/houdinimcp/ ──> hou API
-                                  └──────> houdini_docs.py ──HTTP──> houdinimd.com
+                                  └──────> houdinimd_docs ──> $HFS/houdini/help
 
 No Houdini running? The bridge starts hython -> houdinimcp/headless.py
 ```
