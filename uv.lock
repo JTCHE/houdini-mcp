@@ -282,14 +282,29 @@ wheels = [
 
 [[package]]
 name = "houdinimcp"
-version = "0.2.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
+    { name = "houdinimd-docs" },
     { name = "mcp", extra = ["cli"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=2.2" }]
+requires-dist = [
+    { name = "houdinimd-docs", specifier = ">=0.1" },
+    { name = "mcp", extras = ["cli"], specifier = ">=2.2" },
+]
+
+[[package]]
+name = "houdinimd-docs"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/a4/70a8625d09261de26614fb9a1b03622e7041047b8a42f2a0ea8fcc18d676/houdinimd_docs-0.1.0.tar.gz", hash = "sha256:db3cad217c124383465a57112ebf12b8fb567330356b87ed825c25baa241ab1c", size = 73421, upload-time = "2026-09-11T07:04:09.824Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/11/3825810c436a1cab31f43f854891799ceb1e06a2fe79bbaec2f108000947/houdinimd_docs-0.1.0-cp39-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:f283f5111c83b33aab1735c3d7a13103ba845f8aa119a0f1c729bf72814f6db0", size = 2273528, upload-time = "2026-09-11T07:04:12.648Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/ed/c387dd432cc3b09c9adaec6f2d84892c3045c9af81775f0fa0280b64f5be/houdinimd_docs-0.1.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:03203480ea920d1334994970f911c4e80f5ffa8fdbc913f2c93039d3350f41a0", size = 1134030, upload-time = "2026-09-11T07:04:14.11Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/e0/fc733b25c135ce04336a39d23a7d017a9d6487916e52c32f4217297b8988/houdinimd_docs-0.1.0-cp39-abi3-win_amd64.whl", hash = "sha256:f827499784bc841c7dd8f4a5623b35a6dda1d87ae9e379652759a434eee1c06a", size = 1120450, upload-time = "2026-09-11T07:04:11.162Z" },
+]
 
 [[package]]
 name = "httpcore2"
