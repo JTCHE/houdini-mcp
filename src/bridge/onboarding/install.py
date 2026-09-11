@@ -47,6 +47,9 @@ def parse_args():
                         help="Release to install the plugin for, e.g. 22.0. 'none' skips the plugin")
     parser.add_argument("--prefs-dir", default=None,
                         help="Explicit Houdini preferences directory, instead of a release")
+    parser.add_argument("--quiet-start", action="store_true",
+                        help="Stop the usage statistics dialog and the Start Here window when "
+                             "Houdini starts: adds HOUDINI_NO_START_PAGE_SPLASH=1 to houdini.env")
     parser.add_argument("--harness", action="append", default=[], metavar="KEY",
                         help=f"Harness to configure, repeatable: {', '.join(harnesses.BY_KEY)}, all, none")
     parser.add_argument("--claude-permissions", dest="claude_permissions",
@@ -195,6 +198,8 @@ def main():
         else:
             try:
                 summary["plugin"] = plugin.install(prefs_dir, python_libs, args.dry_run)
+                if args.quiet_start:
+                    summary["plugin"]["wrote"].append(plugin.quiet_start(prefs_dir, args.dry_run))
                 for line in summary["plugin"]["wrote"]:
                     tui.step(line)
                 tui.ok(f"Plugin installed into {prefs_dir}")

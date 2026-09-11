@@ -92,7 +92,9 @@ macOS, `.\bootstrap.bat --yes` on Windows.
 
 Useful flags: `--houdini-version none` skips the plugin, `--prefs-dir` names the
 Houdini preferences directory outright, `--harness none` leaves every client
-alone, `--skip-deps` skips `uv sync` in a clone.
+alone, `--skip-deps` skips `uv sync` in a clone, `--quiet-start` stops the
+usage statistics dialog and the Start Here window that cover the viewport on
+a first launch (it adds `HOUDINI_NO_START_PAGE_SPLASH = 1` to `houdini.env`).
 
 With `--json`, stdout carries the JSON report and nothing else — the progress
 log goes to stderr. The report names every file written and every client
