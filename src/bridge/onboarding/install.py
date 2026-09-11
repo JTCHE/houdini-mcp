@@ -198,6 +198,15 @@ def main():
                 for line in summary["plugin"]["wrote"]:
                     tui.step(line)
                 tui.ok(f"Plugin installed into {prefs_dir}")
+                # Git Bash sets HOME, and a Houdini started from it inherits that.
+                shell_home = os.environ.get("HOME")
+                other = shell_home and os.path.join(shell_home, os.path.basename(os.path.normpath(prefs_dir)))
+                if os.name == "nt" and other and os.path.normcase(other) != os.path.normcase(os.path.normpath(prefs_dir)):
+                    note = (f"A Houdini started from this shell reads {other} instead, because "
+                            f"the shell sets HOME. Start Houdini from the Start menu, or install "
+                            f"again with --prefs-dir {other}.")
+                    summary.setdefault("warnings", []).append(note)
+                    tui.warn(note)
             except OSError as error:
                 summary["errors"].append(f"plugin: {error}")
                 tui.fail(f"Plugin install failed: {error}")
