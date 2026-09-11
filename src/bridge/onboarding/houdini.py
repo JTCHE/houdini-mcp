@@ -68,11 +68,12 @@ def prefs_dir_for(release: str) -> str:
     """The user preferences directory Houdini uses for a release, e.g. '22.0'.
 
     Houdini puts the directory under $HOME. On Windows $HOME is usually not
-    set, and then Houdini uses the Documents folder.
+    set, and then Houdini uses the Documents folder. HOUDINI_USER_PREF_DIR
+    wins over both; Houdini puts the release in place of its __HVER__.
     """
     explicit = _user_env("HOUDINI_USER_PREF_DIR")
     if explicit:
-        return explicit
+        return explicit.replace("__HVER__", release)
     home = _user_env("HOME")
     system = platform.system()
     if system == "Windows":

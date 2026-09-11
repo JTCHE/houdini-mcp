@@ -139,6 +139,13 @@ stops the TCP server.
 
 Headless mode gives you every tool except the ones that need a UI: viewport,
 screenshots and flipbooks. Set `HOUDINIMCP_NO_HEADLESS=1` to turn auto-launch off.
+For those, `session` with `action="start_gui"` starts Houdini with its window
+(and `hip=` opens a file), then waits for the plugin.
+
+On Windows, a Houdini that the bridge starts reads the same preferences as one
+started from the Start menu: the bridge sets `HOUDINI_USER_PREF_DIR` when it is
+not set. A shell that sets `HOME` (Git Bash does) otherwise sends Houdini to
+`$HOME\houdiniX.Y`.
 
 ## Contributing
 

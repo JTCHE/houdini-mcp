@@ -203,13 +203,17 @@ def main():
                 for line in summary["plugin"]["wrote"]:
                     tui.step(line)
                 tui.ok(f"Plugin installed into {prefs_dir}")
-                # Git Bash sets HOME, and a Houdini started from it inherits that.
+                # Git Bash sets HOME, and a Houdini started from it inherits that,
+                # unless HOUDINI_USER_PREF_DIR names the prefs directory.
                 shell_home = os.environ.get("HOME")
                 other = shell_home and os.path.join(shell_home, os.path.basename(os.path.normpath(prefs_dir)))
-                if os.name == "nt" and other and os.path.normcase(other) != os.path.normcase(os.path.normpath(prefs_dir)):
+                if os.name == "nt" and other and not os.environ.get("HOUDINI_USER_PREF_DIR") \
+                        and os.path.normcase(other) != os.path.normcase(os.path.normpath(prefs_dir)):
                     note = (f"The plugin went into {prefs_dir}. A Houdini "
                             f"started from this shell reads {other} instead, because the shell "
-                            f"sets HOME.")
+                            f"sets HOME. The bridge does not have this problem. To fix it for "
+                            f"the shell, set the user variable HOUDINI_USER_PREF_DIR to "
+                            f"{houdini.prefs_dir_for('__HVER__')}.")
                     summary["warnings"].append(note)
                     tui.warn(note)
             except OSError as error:
