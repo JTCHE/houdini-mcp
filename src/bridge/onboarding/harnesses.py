@@ -173,6 +173,61 @@ def _cursor_configure(repo_dir: str, dry_run: bool) -> str:
     return _write_json_server(_home(".cursor", "mcp.json"), repo_dir, dry_run)
 
 
+# ── opencode ──
+
+def _opencode_dir() -> str:
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or _home(".config"), "opencode")
+
+
+def _opencode_detect() -> bool:
+    return bool(shutil.which("opencode")) or os.path.isdir(_opencode_dir())
+
+
+def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
+    # The global config has three accepted names. Use the one that exists.
+    names = ("opencode.json", "opencode.jsonc", "config.json")
+    path = next((os.path.join(_opencode_dir(), name) for name in names
+                 if os.path.isfile(os.path.join(_opencode_dir(), name))),
+                os.path.join(_opencode_dir(), names[0]))
+    config = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                config = json.load(handle)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{path} is not plain JSON ({error}). Add the server by hand: "
+                               f"mcp.{SERVER_NAME} = {_opencode_server(repo_dir)}")
+    config.setdefault("$schema", "https://opencode.ai/config.json")
+    config.setdefault("mcp", {})[SERVER_NAME] = _opencode_server(repo_dir)
+    if not dry_run:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+    return path
+
+
+def _opencode_server(repo_dir: str) -> dict:
+    command = server_command(repo_dir)
+    return {"type": "local", "command": [command["command"], *command["args"]], "enabled": True}
+
+
+# ── pi ──
+
+def _pi_dir() -> str:
+    return os.environ.get("PI_CODING_AGENT_DIR") or _home(".pi", "agent")
+
+
+def _pi_detect() -> bool:
+    return bool(shutil.which("pi")) or os.path.isdir(_pi_dir())
+
+
+def _pi_configure(repo_dir: str, dry_run: bool) -> str:
+    # pi has no MCP of its own. The pi-mcp-adapter extension reads this file.
+    path = _write_json_server(os.path.join(_pi_dir(), "mcp.json"), repo_dir, dry_run)
+    return f"{path} (pi reads it through pi-mcp-adapter: pi install npm:pi-mcp-adapter)"
+
+
 class Harness:
     def __init__(self, key, label, detect, configure):
         self.key = key
@@ -191,6 +246,8 @@ HARNESSES = [
     Harness("codex", "OpenAI Codex", _codex_detect, _codex_configure),
     Harness("gemini-cli", "Gemini CLI", _gemini_detect, _gemini_configure),
     Harness("cursor", "Cursor", _cursor_detect, _cursor_configure),
+    Harness("opencode", "opencode", _opencode_detect, _opencode_configure),
+    Harness("pi", "pi", _pi_detect, _pi_configure),
 ]
 
 BY_KEY = {harness.key: harness for harness in HARNESSES}

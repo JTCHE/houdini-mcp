@@ -54,7 +54,9 @@ curl -sSL https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/bootstrap.sh 
 ```
 
 At a terminal you get menus: which Houdini release to install for, which
-harnesses to configure — Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor.
+harnesses to configure — Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor,
+opencode, pi. pi reads MCP servers through its
+[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) extension.
 
 Have uv already? `uv tool install houdinimcp && houdinimcp-install` does the
 same thing.
