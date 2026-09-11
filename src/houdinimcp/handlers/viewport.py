@@ -71,13 +71,17 @@ def set_viewport_display(shading_mode=None, guide=None):
 
 
 def set_viewport_renderer(renderer):
-    """Set the viewport renderer (GL, Karma, etc.)."""
+    """Set the Hydra renderer of the scene viewer, for example "Karma CPU"
+    or "Houdini VK". It applies to a viewer that shows a LOP network."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
-    viewport = viewer.curViewport()
-    viewport.changeType(hou.geometryViewportType.__dict__.get(renderer, hou.geometryViewportType.Perspective))
-    return {"renderer": renderer}
+    available = viewer.hydraRenderers()
+    match = next((name for name in available if name.lower() == renderer.lower()), None)
+    if match is None:
+        raise ValueError(f"Unknown viewport renderer: {renderer}. Use one of: {list(available)}")
+    viewer.setHydraRenderer(match)
+    return {"renderer": viewer.currentHydraRenderer()}
 
 
 def frame_selection():

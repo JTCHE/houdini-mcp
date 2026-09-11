@@ -33,8 +33,10 @@ def tool(mode: str = "viewport", output: str = None, camera: str = None,
 
     Before the capture, these change the view when you give them: `camera`,
     `direction` ("top", "front", "persp", …), `shading` ("smooth",
-    "wireframe", …), `renderer`, and `frame` ("selection" or "all") to fit the
-    view around the geometry.
+    "smooth_wire", "flat", "wireframe"), `renderer` (the Hydra renderer of a
+    viewer on a LOP network, for example "Karma CPU"; an unknown name lists
+    the ones available), and `frame` ("selection" or "all") to fit the view
+    around the geometry.
 
     output: where to write the file. Without it, Houdini writes to a temporary
     file.
