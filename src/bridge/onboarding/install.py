@@ -115,10 +115,10 @@ def choose_harnesses(args, asking):
 def sync_dependencies(dry_run):
     """Create the venv and install the dependencies with uv."""
     if not REPO_DIR:
-        tui.step("Installed from a package — the dependencies are already there")
+        tui.step("Installed from a package: the dependencies are already there")
         return True
     if not shutil.which("uv"):
-        tui.warn("uv is not installed — skipping dependencies. See https://docs.astral.sh/uv/")
+        tui.warn("uv is not installed. Skipping dependencies. See https://docs.astral.sh/uv/")
         return False
     if dry_run:
         tui.step("would run: uv sync")
@@ -164,7 +164,7 @@ def main():
         for install in installs:
             tui.ok(f"Found Houdini {install.version}")
     else:
-        tui.warn("No Houdini install found — the plugin step needs one")
+        tui.warn("No Houdini install found. The plugin step needs one")
 
     prefs_dir = choose_houdini(args, installs, asking)
 
@@ -220,7 +220,7 @@ def main():
                 summary["errors"].append(f"plugin: {error}")
                 tui.fail(f"Plugin install failed: {error}")
     else:
-        tui.warn("Skipped — run again with --houdini-version once Houdini is installed")
+        tui.warn("Skipped. Run again with --houdini-version once Houdini is installed")
 
     tui.title("MCP client configuration")
     if not chosen:

@@ -34,7 +34,7 @@ if [ -f "pyproject.toml" ] && [ -f "houdini_mcp_server.py" ]; then
     ok "Inside the repository — installing from this clone"
     uv run python -m bridge.onboarding.install "$@"
 else
-    step "Installing houdinimcp from PyPI..."
+    step "Installing houdini-mcp-server from PyPI..."
     uv tool install --force houdini-mcp-server
     ok "Installed"
     houdinimcp-install "$@"

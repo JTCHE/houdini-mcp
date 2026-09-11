@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-REM bootstrap.bat — One-command setup for HoudiniMCP (Windows).
+REM bootstrap.bat - One-command setup for HoudiniMCP (Windows).
 REM
 REM Puts uv on the machine, installs the houdinimcp package from PyPI, then
 REM hands over to the installer, which does the Houdini plugin and the MCP
@@ -30,12 +30,12 @@ for /f "tokens=*" %%v in ('uv --version') do echo [OK]   %%v
 
 if exist "pyproject.toml" if exist "houdini_mcp_server.py" set "IN_REPO=1"
 if defined IN_REPO (
-    echo [OK]   Inside the repository — installing from this clone
+    echo [OK]   Inside the repository - installing from this clone
     uv run python -m bridge.onboarding.install %*
     exit /b !errorlevel!
 )
 
-echo [..]   Installing houdinimcp from PyPI...
+echo [..]   Installing houdini-mcp-server from PyPI...
 uv tool install --force houdini-mcp-server || exit /b 1
 echo [OK]   Installed
 houdinimcp-install %*

@@ -1,0 +1,4 @@
+# cmd.exe misreads a batch file with LF line endings. Store it with CRLF as it
+# is, so the raw GitHub download in the README has CRLF too.
+*.bat -text
+*.sh text eol=lf
