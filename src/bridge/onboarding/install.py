@@ -202,9 +202,9 @@ def main():
                 shell_home = os.environ.get("HOME")
                 other = shell_home and os.path.join(shell_home, os.path.basename(os.path.normpath(prefs_dir)))
                 if os.name == "nt" and other and os.path.normcase(other) != os.path.normcase(os.path.normpath(prefs_dir)):
-                    note = (f"A Houdini started from this shell reads {other} instead, because "
-                            f"the shell sets HOME. Start Houdini from the Start menu, or install "
-                            f"again with --prefs-dir {other}.")
+                    note = (f"The plugin went into {prefs_dir}. A Houdini "
+                            f"started from this shell reads {other} instead, because the shell "
+                            f"sets HOME.")
                     summary["warnings"].append(note)
                     tui.warn(note)
             except OSError as error:
