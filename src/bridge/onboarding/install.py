@@ -64,7 +64,7 @@ def parse_args():
 def choose_houdini(args, installs, asking):
     """Return the prefs directory to install into, or None to skip the plugin."""
     if args.prefs_dir:
-        return args.prefs_dir
+        return os.path.normpath(args.prefs_dir)
     if args.houdini_version == "none":
         return None
     if args.houdini_version:
@@ -148,7 +148,7 @@ def main():
 
     asking = tui.interactive() and not args.yes
     summary = {"repo_dir": REPO_DIR, "dry_run": args.dry_run,
-               "plugin": None, "harnesses": [], "errors": []}
+               "plugin": None, "harnesses": [], "errors": [], "warnings": []}
 
     tui.title("=== HoudiniMCP install ===")
     tui.say(f"  Repository: {REPO_DIR}" if REPO_DIR
@@ -205,7 +205,7 @@ def main():
                     note = (f"A Houdini started from this shell reads {other} instead, because "
                             f"the shell sets HOME. Start Houdini from the Start menu, or install "
                             f"again with --prefs-dir {other}.")
-                    summary.setdefault("warnings", []).append(note)
+                    summary["warnings"].append(note)
                     tui.warn(note)
             except OSError as error:
                 summary["errors"].append(f"plugin: {error}")
