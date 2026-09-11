@@ -59,7 +59,7 @@ harnesses to configure — Claude Code, Claude Desktop, Codex, Gemini CLI, Curso
 opencode, pi. pi reads MCP servers through its
 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) extension.
 
-Have uv already? `uv tool install houdinimcp && houdinimcp-install` does the
+Have uv already? `uv tool install houdini-mcp-server && houdinimcp-install` does the
 same thing.
 
 Working from a clone? Run the installer from the repository root:
@@ -111,7 +111,7 @@ independent check for Claude Code.
 <summary><strong>Manual setup</strong></summary>
 
 ```bash
-uv tool install houdinimcp
+uv tool install houdini-mcp-server
 houdinimcp-install --harness none                              # plugin only
 claude mcp add --transport stdio houdini -- houdinimcp-bridge
 ```

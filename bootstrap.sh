@@ -35,7 +35,7 @@ if [ -f "pyproject.toml" ] && [ -f "houdini_mcp_server.py" ]; then
     uv run python -m bridge.onboarding.install "$@"
 else
     step "Installing houdinimcp from PyPI..."
-    uv tool install --force houdinimcp
+    uv tool install --force houdini-mcp-server
     ok "Installed"
     houdinimcp-install "$@"
 fi

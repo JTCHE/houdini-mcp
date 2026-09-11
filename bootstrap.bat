@@ -36,7 +36,7 @@ if defined IN_REPO (
 )
 
 echo [..]   Installing houdinimcp from PyPI...
-uv tool install --force houdinimcp || exit /b 1
+uv tool install --force houdini-mcp-server || exit /b 1
 echo [OK]   Installed
 houdinimcp-install %*
 exit /b !errorlevel!
