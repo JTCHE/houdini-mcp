@@ -16,7 +16,8 @@ EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 class HoudiniMCPServer:
     def __init__(self, host='localhost', port=None):
         self.host = host
-        self.port = port if port is not None else protocol.PORT
+        # 0 tells the operating system to pick a free port. See protocol.PORT_FILE.
+        self.port = port if port is not None else (protocol.FORCED_PORT or 0)
         self.running = False
         self.socket = None
         self.client = None
@@ -42,10 +43,13 @@ class HoudiniMCPServer:
             self.socket = None
             raise OSError(
                 f"HoudiniMCP cannot listen on {self.host}:{self.port}: {error}. "
-                f"Another process holds the port. Stop it, or set HOUDINIMCP_PORT "
-                f"to a free port in Houdini and in the MCP client."
+                f"Another process holds the port, or Windows reserved it (WinError "
+                f"10013: see `netsh interface ipv4 show excludedportrange protocol=tcp`). "
+                f"Unset HOUDINIMCP_PORT to let the operating system pick a free port."
             ) from error
         self.socket.listen(1)
+        self.port = self.socket.getsockname()[1]
+        protocol.write_port(self.port)
         self.socket.setblocking(False)
         self.running = True
         if hou.isUIAvailable():
@@ -68,6 +72,7 @@ class HoudiniMCPServer:
         if self.socket:
             self.socket.close()
         self.socket = None
+        protocol.forget_port()
         print("HoudiniMCP server stopped")
 
     def _drop_client(self):

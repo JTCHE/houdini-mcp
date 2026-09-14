@@ -58,11 +58,11 @@ No Houdini open? The server starts a headless `hython`.
 
 | Problem | Fix |
 |---|---|
-| Nothing listens on port 9877 | Start Houdini, or click **Toggle MCP Server** on the HoudiniMCP shelf. |
+| No Houdini listens for the bridge | Start Houdini, or click **Toggle MCP Server** on the HoudiniMCP shelf. |
 | No HoudiniMCP shelf | Restart Houdini. `houdinimcp-install --list` shows where the plugin went. |
 | Houdini started from Git Bash has no plugin | Git Bash sets `HOME`. Set the user variable `HOUDINI_USER_PREF_DIR` to `%USERPROFILE%\Documents\houdini__HVER__`. |
 | `capture` says there is no viewport | The session is headless. Call `session` with `action="start_gui"`. |
-| Port 9877 is busy | Set `HOUDINIMCP_PORT`. |
+| You must have a fixed port | Set `HOUDINIMCP_PORT` for Houdini and for the bridge. Without it, the plugin takes a free port from the operating system and tells the bridge which one. |
 
 </details>
 

@@ -6,7 +6,8 @@ yourself:
 
     hython -m houdinimcp.headless
 
-Set HOUDINIMCP_PORT to change the port. See src/houdinimcp/protocol.py.
+The port comes from the operating system. Set HOUDINIMCP_PORT for a fixed one.
+See src/houdinimcp/protocol.py.
 """
 import os
 import sys
@@ -16,12 +17,12 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from houdinimcp.server import HoudiniMCPServer
+import houdinimcp
 
 
 def main():
-    server = HoudiniMCPServer()
-    server.start()
+    # start_server keeps the server on hou.session, where the session tool reads it.
+    server = houdinimcp.start_server()
     print(f"Headless HoudiniMCP server ready on port {server.port}", flush=True)
     try:
         server.serve_forever()

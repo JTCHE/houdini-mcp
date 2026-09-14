@@ -19,7 +19,6 @@ from houdinimcp import protocol
 
 logger = logging.getLogger("HoudiniMCP.bridge")
 
-PORT = protocol.PORT
 HEADLESS_DISABLED = os.getenv("HOUDINIMCP_NO_HEADLESS", "").strip() in ("1", "true", "yes")
 # hython runs this file by path, because it cannot import from the bridge venv.
 HEADLESS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(protocol.__file__)),
@@ -50,6 +49,8 @@ class Connection:
     def connect(self) -> bool:
         if self.sock is not None:
             return True
+        if not self.port:
+            return False
         try:
             self.sock = socket.create_connection((self.host, self.port), timeout=10)
             self.connected_since = time.monotonic()
@@ -89,7 +90,7 @@ class Connection:
         """
         for attempt in (1, 2):
             if not self.connect():
-                raise HoudiniError(start_hint(self.port))
+                raise HoudiniError(start_hint())
             try:
                 self.sock.settimeout(timeout)
                 self.sock.sendall(protocol.encode(command))
@@ -110,20 +111,20 @@ class Connection:
                     continue
                 raise HoudiniError(
                     f"The connection to Houdini failed on '{command['type']}': {error}. "
-                    f"{start_hint(self.port)}"
+                    f"{start_hint()}"
                 )
 
 
-def start_hint(port: int) -> str:
+def start_hint() -> str:
     """What the user must do to get a Houdini that answers."""
     if HEADLESS_DISABLED:
-        return (f"Nothing listens on port {port}, and HOUDINIMCP_NO_HEADLESS stops the "
-                f"bridge from starting one. Start Houdini, or unset that variable.")
+        return ("No Houdini listens for the bridge, and HOUDINIMCP_NO_HEADLESS stops the "
+                "bridge from starting one. Start Houdini, or unset that variable.")
     if not find_hython():
-        return (f"Nothing listens on port {port}, and no hython was found to start one. "
-                f"Start Houdini, or set HFS to a Houdini install.")
-    return (f"Nothing listens on port {port}. Start Houdini, or call session with "
-            f"action='start' to run a headless one.")
+        return ("No Houdini listens for the bridge, and no hython was found to start one. "
+                "Start Houdini, or set HFS to a Houdini install.")
+    return ("No Houdini listens for the bridge. Start Houdini, or call session with "
+            "action='start' to run a headless one.")
 
 
 def find_hython() -> Optional[str]:
@@ -162,8 +163,12 @@ def find_hython() -> Optional[str]:
 
 
 def port_is_listening(port: int = None, host: str = "localhost") -> bool:
+    """True when the port the plugin announced accepts a connection."""
+    port = port or protocol.read_port()
+    if not port:
+        return False
     try:
-        with socket.create_connection((host, port or PORT), timeout=1):
+        with socket.create_connection((host, port), timeout=1):
             return True
     except OSError:
         return False
@@ -179,7 +184,6 @@ def houdini_env() -> dict:
     """
     from .onboarding.houdini import prefs_dir_for
     environment = os.environ.copy()
-    environment["HOUDINIMCP_PORT"] = str(PORT)
     if os.name == "nt" and not environment.get("HOUDINI_USER_PREF_DIR"):
         environment["HOUDINI_USER_PREF_DIR"] = prefs_dir_for("__HVER__")
     return environment
@@ -208,11 +212,12 @@ def start_headless(wait_seconds: float = 90.0) -> str:
     if not hython:
         raise HoudiniError("No hython was found. Set HFS to a Houdini install, or start "
                            "Houdini yourself.")
+    protocol.forget_port()
     _hython = subprocess.Popen([hython, HEADLESS_SCRIPT], env=houdini_env(),
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         if _wait_for_port(_hython, wait_seconds):
-            return f"Headless Houdini is ready on port {PORT}."
+            return f"Headless Houdini is ready on port {protocol.read_port()}."
     except HoudiniError:
         _hython = None
         raise
@@ -236,12 +241,13 @@ def start_gui(hip: str = None, wait_seconds: float = 240.0) -> str:
         raise HoudiniError(f"There is no file at {hip}.")
     detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
               if os.name == "nt" else {"start_new_session": True})
+    protocol.forget_port()
     process = subprocess.Popen([houdini] + ([hip] if hip else []), env=houdini_env(),
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, **detach)
     if _wait_for_port(process, wait_seconds):
-        return f"Houdini {houdini} is ready on port {PORT}."
-    raise HoudiniError(f"Houdini started, but nothing listened on port {PORT} within "
+        return f"Houdini {houdini} is ready on port {protocol.read_port()}."
+    raise HoudiniError(f"Houdini started, but it did not listen within "
                        f"{wait_seconds:.0f} seconds. It may still load, or want a license, "
                        f"or the plugin is not installed: run houdinimcp-install. Look at the "
                        f"window, then call session with action='status'.")
@@ -271,10 +277,13 @@ def connection(auto_start: bool = True) -> Connection:
     """The one connection to Houdini. Starts a headless session if none listens."""
     global _connection
     if _connection is None:
-        _connection = Connection(host="localhost", port=PORT)
+        _connection = Connection(host="localhost", port=None)
     if _connection.sock is None and not port_is_listening() and auto_start \
             and not HEADLESS_DISABLED:
         start_headless()
+    if _connection.sock is None:
+        # The plugin picks a free port on every start, so read it again here.
+        _connection.port = protocol.read_port()
     return _connection
 
 
@@ -282,7 +291,9 @@ def status() -> dict:
     """What the bridge knows about Houdini, without starting anything."""
     live = connection(auto_start=False)
     report = live.status()
-    report["port_is_listening"] = port_is_listening()
+    # The plugin takes one client at a time, so a probe while the bridge holds the
+    # socket can time out. A live socket is proof enough.
+    report["port_is_listening"] = live.sock is not None or port_is_listening()
     report["headless_started_by_bridge"] = headless_is_ours()
     report["hython"] = find_hython()
     return report

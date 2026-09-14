@@ -47,6 +47,6 @@ def tool(action: str = "status", hip: str = None) -> str:
         except HoudiniError as error:
             report["houdini"] = str(error)
     else:
-        from ..connection import PORT, start_hint
-        report["next_action"] = start_hint(PORT)
+        from ..connection import start_hint
+        report["next_action"] = start_hint()
     return json.dumps(report, indent=2, default=str)
