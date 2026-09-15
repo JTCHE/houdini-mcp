@@ -182,6 +182,11 @@ def live_sessions(probe: bool = True) -> list:
                 and _connection.port == entry["port"]
             entry["answers"] = live or port_is_listening(entry["port"])
         entry["running"] = process_is_alive(entry.get("pid"))
+        if not entry["running"] and not entry.get("answers"):
+            # A Houdini that was killed cannot take its own file away. Nobody
+            # else will, so the list would grow with dead sessions for ever.
+            protocol.withdraw(entry["port"])
+            continue
         found.append(entry)
     return found
 
