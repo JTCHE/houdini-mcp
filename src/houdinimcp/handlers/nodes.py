@@ -2,30 +2,43 @@
 import hou
 
 
-def create_node(node_type, parent_path="/obj", name=None, position=None, parameters=None):
-    """Creates a new node in the specified parent."""
+def create_node(node_type, parent_path="/obj", name=None, position=None, parameters=None,
+                input_path=None):
+    """Make a node, place it, wire its first input, and write its parameters."""
+    from . import parameters as parameters_handler
+
+    parent = hou.node(parent_path)
+    if not parent:
+        raise ValueError(f"Parent path not found: {parent_path}")
     try:
-        parent = hou.node(parent_path)
-        if not parent:
-            raise ValueError(f"Parent path not found: {parent_path}")
-
         node = parent.createNode(node_type, node_name=name)
-        if position and len(position) >= 2:
-            node.setPosition([position[0], position[1]])
-        if parameters:
-            for p_name, p_val in parameters.items():
-                parm = node.parm(p_name)
-                if parm:
-                    parm.set(p_val)
+    except hou.OperationFailed as error:
+        raise ValueError(f"Houdini has no node type '{node_type}' in {parent_path}: {error}. "
+                         f"Read the type name with scene_overview mode 'node_types'.") from error
 
-        return {
-            "name": node.name(),
-            "path": node.path(),
-            "type": node.type().name(),
-            "position": list(node.position()),
-        }
-    except Exception as e:
-        raise Exception(f"Failed to create node: {str(e)}")
+    report = {"name": node.name(), "path": node.path(), "type": node.type().name()}
+    if name and node.name() != name:
+        report["renamed_by_houdini"] = (f"The name '{name}' was in use. Use the path in this "
+                                        f"result from now on.")
+    if input_path:
+        source = hou.node(input_path)
+        if not source:
+            raise ValueError(f"Input node not found: {input_path}")
+        node.setInput(0, source)
+        report["input"] = source.path()
+    if position and len(position) >= 2:
+        node.setPosition([position[0], position[1]])
+    else:
+        place_node(node)
+    report["position"] = list(node.position())
+    if parameters:
+        # The same write path as parm_set, so a write that does nothing is
+        # reported here too instead of passing for success.
+        written = parameters_handler.set_parameters(node.path(), parameters)
+        report["parameters"] = written["changes"]
+        if written["not_applied"]:
+            report["not_applied"] = written["not_applied"]
+    return report
 
 
 def modify_node(path, parameters=None, position=None, name=None):
@@ -270,13 +283,43 @@ def set_node_flags(node_path, display=None, render=None, bypass=None):
     return {"path": node.path(), "changes": changes}
 
 
-def layout_children(node_path="/obj"):
-    """Auto-layout child nodes."""
+def layout_children(node_path="/obj", paths=None):
+    """Tidy the nodes of a network.
+
+    `paths` names the nodes to move. Without it every node in the network
+    moves, and the positions that a person set by hand are lost: only do that
+    when the user asked for it.
+    """
     node = hou.node(node_path)
     if not node:
         raise ValueError(f"Node not found: {node_path}")
+    if paths:
+        items = []
+        for path in paths:
+            child = hou.node(path)
+            if not child:
+                raise ValueError(f"Node not found: {path}")
+            items.append(child)
+        node.layoutChildren(items=items)
+        return {"path": node.path(), "laid_out": [item.path() for item in items]}
     node.layoutChildren()
-    return {"path": node.path(), "laid_out": True}
+    return {"path": node.path(), "laid_out": "every node in this network",
+            "warning": "Every node moved, and that includes the nodes that the user "
+                       "placed by hand. Give `paths` to move only your own nodes."}
+
+
+def place_node(node):
+    """Put one new node in a free place near its input, and move nothing else.
+
+    Houdini's own layout moves every node in the network. A new node that
+    places itself removes the reason to call that.
+    """
+    try:
+        node.moveToGoodPosition(relative_to_inputs=True, move_inputs=False,
+                                move_outputs=False, move_unconnected=False)
+    except (hou.OperationFailed, AttributeError):
+        pass
+    return list(node.position())
 
 
 def set_node_color(node_path, color):
@@ -500,23 +543,212 @@ def reorder_inputs(path, input_indices):
     return {"path": node.path(), "new_order": input_indices}
 
 
-def find_error_nodes(root_path="/obj"):
-    """Scan node hierarchy for cook errors and warnings."""
+def name_parameters(path, pattern=None):
+    """The names and labels of the parameters of a node, and nothing else.
+
+    The cheapest answer to "what is this parameter called". A full read of a
+    solver has hundreds of thousands of characters and a client drops it.
+    """
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    found = []
+    for parm in node.parms():
+        label = parm.parmTemplate().label()
+        if pattern and pattern.lower() not in parm.name().lower() \
+                and pattern.lower() not in label.lower():
+            continue
+        found.append({"name": parm.name(), "label": label,
+                      "type": parm.parmTemplate().type().name()})
+    return {"path": path, "count": len(found), "parameters": found}
+
+
+def _known_names(node):
+    """Every name that the geometry at a node's inputs really carries.
+
+    A parameter that names an attribute, a group or a volume field turns its
+    feature off in silence when the name matches nothing, so the list of names
+    that do exist is what a caller needs to see.
+    """
+    names = {"attributes": set(), "groups": set(), "volumes": set()}
+    # The node itself as well as its inputs: a solver SOP names the fields of
+    # the simulation it makes, and those fields are not at its input.
+    sources = [source for source in node.inputs() if source] + [node]
+    for source in sources:
+        try:
+            geometry = source.geometry()
+        except (hou.OperationFailed, AttributeError):
+            continue
+        if not geometry:
+            continue
+        for attribute in (list(geometry.pointAttribs()) + list(geometry.primAttribs())
+                          + list(geometry.globalAttribs()) + list(geometry.vertexAttribs())):
+            names["attributes"].add(attribute.name())
+        for group in list(geometry.pointGroups()) + list(geometry.primGroups()):
+            names["groups"].add(group.name())
+        # A volume or a VDB carries its field name in the `name` primitive
+        # attribute, which is also how a solver parameter names a field.
+        if geometry.findPrimAttrib("name"):
+            names["volumes"].update(geometry.primStringAttribValues("name"))
+    return {kind: sorted(value) for kind, value in names.items()}
+
+
+def validate_names(path):
+    """Find parameters that name an attribute, group or field that does not exist.
+
+    Houdini does not report this. The feature that reads the name simply does
+    nothing, the node cooks with no error, and the result is wrong in a way
+    that looks like a wrong choice of tool.
+    """
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    known = _known_names(node)
+    every = set(known["attributes"]) | set(known["groups"]) | set(known["volumes"])
+    unmatched = []
+    for parm in node.parms():
+        if parm.parmTemplate().type() != hou.parmTemplateType.String:
+            continue
+        if parm.isAtDefault() or parm.isDisabled():
+            continue
+        try:
+            value = parm.eval()
+        except hou.OperationFailed:
+            continue
+        # Only a bare name can be an attribute, a group or a field. A path, a
+        # pattern or an expression is something else.
+        if not value or not value.replace("_", "").isalnum() or value == node.name():
+            continue
+        if value in every:
+            continue
+        unmatched.append({"parm": parm.name(), "label": parm.parmTemplate().label(),
+                          "value": value})
+    return {
+        "path": path, "reads_geometry_from": [one.path() for one in node.inputs() if one],
+        "names_nothing": unmatched,
+        "available": known,
+        "note": ("Each parameter in names_nothing holds a bare name that no attribute, "
+                 "group or volume of the input geometry carries. Houdini reports nothing "
+                 "for this: the feature that reads the name does nothing. Confirm each "
+                 "one against `available` before you change it; a name can also belong to "
+                 "geometry that another input or a later frame makes."),
+    }
+
+
+# Marks in the text of a parameter that make a node cook again every frame.
+TIME_MARKS = ("$F", "$T", "$SF", "frame()", "time()", "$FF")
+
+# Parameters that make a node time dependent by their value, not by an
+# expression. A LOP Import set to "Animated" is the common one.
+TIME_PARMS = ("timesample", "importtime", "sample_behavior", "timedependent",
+              "cacheframe", "motionblur")
+
+
+def _why_time_dependent(node):
+    """The parameters and the inputs that make this node cook on every frame."""
+    causes = []
+    for parm in node.parms():
+        expression = None
+        try:
+            expression = parm.expression()
+        except hou.OperationFailed:
+            pass
+        raw = parm.rawValue()
+        text = expression or (raw if isinstance(raw, str) else "")
+        if any(mark in text for mark in TIME_MARKS):
+            causes.append({"parm": parm.name(), "value": _short(text, 200)})
+        elif parm.name() in TIME_PARMS and parm.eval():
+            causes.append({"parm": parm.name(), "value": parm.eval()})
+    upstream = []
+    for other in node.inputs():
+        try:
+            if other is not None and other.isTimeDependent():
+                upstream.append(other.path())
+        except (AttributeError, hou.OperationFailed):
+            continue
+    return causes, upstream
+
+
+def time_dependency(path, frames=None, limit=40):
+    """Which nodes cook again on every frame, why they do, and what each costs.
+
+    Playback is slow because of a small number of nodes. This names them, says
+    what makes each one time dependent, and, with `frames`, times each one and
+    sorts the answer by the time it takes. A node with no reason of its own
+    takes it from an input, and the input is named.
+    """
+    from . import timing
+
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    dependent = []
+    for child in [node] + list(node.allSubChildren()):
+        try:
+            if not child.isTimeDependent():
+                continue
+        except (AttributeError, hou.OperationFailed):
+            continue
+        causes, upstream = _why_time_dependent(child)
+        dependent.append({"path": child.path(), "type": child.type().name(),
+                          "time_dependent_parms": causes,
+                          "time_dependent_inputs": upstream})
+
+    report = {"path": path, "count": len(dependent)}
+    if frames:
+        # Time each one on its own: the sum over a chain says nothing about
+        # which node in it is the slow one.
+        for row in dependent[:limit]:
+            target = hou.node(row["path"])
+            if not target:
+                continue
+            timed = timing.cook_over([target], frames)
+            row["mean_seconds"] = timed["mean_seconds"]
+            row["total_seconds"] = timed["total_seconds"]
+            if timed["errors"]:
+                row["errors"] = timed["errors"]
+        dependent.sort(key=lambda row: row.get("mean_seconds", 0), reverse=True)
+        if len(dependent) > limit:
+            report["not_timed"] = (f"{len(dependent) - limit} more nodes are time "
+                                   f"dependent and were not timed. Raise limit, or "
+                                   f"give a path deeper in the scene.")
+    report["time_dependent"] = dependent
+    return report
+
+
+def find_error_nodes(root_path="/obj", limit=20, message_chars=600):
+    """The nodes under a root that hold an error or a warning.
+
+    Errors come first: a scene with a hundred warnings would otherwise push the
+    one error that matters out of the answer. Long messages are cut, and the
+    report says how many nodes it did not return.
+    """
     root = hou.node(root_path)
     if not root:
         raise ValueError(f"Root node not found: {root_path}")
-    error_nodes = []
+    bad, warned = [], []
     for node in root.allSubChildren():
-        if node.errors():
-            error_nodes.append({
-                "path": node.path(),
-                "type": node.type().name(),
-                "errors": node.errors(),
-            })
-        elif node.warnings():
-            error_nodes.append({
-                "path": node.path(),
-                "type": node.type().name(),
-                "warnings": node.warnings(),
-            })
-    return {"root": root_path, "error_count": len(error_nodes), "nodes": error_nodes}
+        try:
+            errors, warnings = node.errors(), node.warnings()
+        except hou.OperationFailed:
+            continue
+        if errors:
+            bad.append({"path": node.path(), "type": node.type().name(),
+                        "errors": [_short(text, message_chars) for text in errors]})
+        elif warnings:
+            warned.append({"path": node.path(), "type": node.type().name(),
+                           "warnings": [_short(text, message_chars) for text in warnings]})
+    found = bad + warned
+    report = {"root": root_path, "error_count": len(bad),
+              "warning_count": len(warned), "nodes": found[:limit]}
+    if len(found) > limit:
+        report["not_returned"] = (f"{len(found) - limit} more nodes hold an error or a "
+                                  f"warning. Raise limit, or give a root_path deeper "
+                                  f"in the scene.")
+    return report
+
+
+def _short(text, most):
+    """A message cut to a length a reader can take in."""
+    text = text or ""
+    return text if len(text) <= most else text[:most] + f" ... [{len(text)} chars]"

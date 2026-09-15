@@ -3,7 +3,8 @@ from ..connection import call_json
 
 
 def tool(limit: int = 100, severity: str = None, source: str = None,
-         node_errors: bool = True, root_path: str = "/obj") -> str:
+         node_errors: bool = True, root_path: str = "/obj",
+         node_limit: int = 20) -> str:
     """Read the Houdini log and the node errors.
 
     Use it when something did not do what you expected. A cook error often
@@ -20,9 +21,12 @@ def tool(limit: int = 100, severity: str = None, source: str = None,
             "Python".
     node_errors: also walk the nodes under `root_path` and report the ones with
                  an error or a warning. Set it to False for the log alone.
+    node_limit: how many such nodes come back. The ones with an error come
+                first, and the report says how many it left out.
 
     Returns JSON.
     """
     return call_json("console", {"limit": limit, "severity": severity,
                                  "source": source, "node_errors": node_errors,
-                                 "root_path": root_path}, timeout=120.0)
+                                 "root_path": root_path,
+                                 "node_limit": node_limit}, timeout=120.0)

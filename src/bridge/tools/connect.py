@@ -1,11 +1,11 @@
 """connect — wire nodes, break a wire, change input order."""
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ..connection import call_json
 
 
 def tool(mode: str = "connect",
-         items: Union[Dict[str, Any], List[Dict[str, Any]]] = None,
+         items: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
          src_path: str = None, dst_path: str = None, dst_input_index: int = 0,
          src_output_index: int = 0, path: str = None, input_index: int = 0,
          input_indices: List[int] = None) -> str:

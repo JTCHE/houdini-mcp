@@ -10,48 +10,123 @@ payload or two queued messages break the parse.
 import json
 import os
 import struct
-import tempfile
+import sys
 
 # Without HOUDINIMCP_PORT the plugin lets the operating system pick a free port.
 # A fixed number is not safe: Windows reserves blocks of ports for Hyper-V and
-# WSL, and a bind in such a block fails with WinError 10013. The plugin writes
-# the port it got to PORT_FILE, and the bridge reads it from there.
+# WSL, and a bind in such a block fails with WinError 10013.
 FORCED_PORT = int(os.environ["HOUDINIMCP_PORT"]) if os.environ.get("HOUDINIMCP_PORT") else None
-# No user name from the environment: the bridge and Houdini must agree on this
-# path, and a subprocess does not always carry USERNAME. On Windows the temporary
-# directory is already per user; on POSIX the user id separates the files.
-_SUFFIX = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
-PORT_FILE = os.path.join(tempfile.gettempdir(), f"houdinimcp{_SUFFIX}.port")
+
+
+def data_dir() -> str:
+    """The folder where HoudiniMCP keeps what outlives one call.
+
+    Not the temporary directory. Houdini and the bridge are different
+    processes, and they do not always get the same TEMP: a Houdini that a
+    launcher or a service starts gets C:\\Windows\\Temp, and then the bridge
+    looks for its session in another folder and reports that no Houdini runs.
+
+    A Houdini started from a shelf or a launcher can also have almost no
+    environment: no LOCALAPPDATA, and `expanduser` that gives back "~". So on
+    Windows the registry answers when the environment does not, and the result
+    is always an absolute path that both processes compute the same way.
+    """
+    explicit = os.environ.get("HOUDINIMCP_HOME")
+    if explicit:
+        return explicit
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or _windows_local_appdata()
+        return os.path.join(base, "HoudiniMCP")
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "HoudiniMCP")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    return os.path.join(base, "houdinimcp")
+
+
+def _windows_local_appdata() -> str:
+    """The Local AppData folder of this user, asked of Windows itself.
+
+    Windows answers whatever the environment of the process holds. The
+    registry is no help on its own: it writes the path as
+    `%USERPROFILE%\\AppData\\Local`, and a process without USERPROFILE cannot
+    expand that.
+    """
+    try:
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(260)
+        # SHGetFolderPathW, CSIDL_LOCAL_APPDATA (0x1c), current user.
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x1C, None, 0, buffer) == 0:
+            return buffer.value
+    except Exception:
+        pass
+    home = os.path.expanduser("~")
+    if home != "~":
+        return os.path.join(home, "AppData", "Local")
+    import tempfile
+    return tempfile.gettempdir()
+
+
+# Every Houdini that runs the plugin writes one file here, named by its port.
+# Several Houdini sessions can listen at the same time, so the bridge needs the
+# list, not one number. A file for each port needs no lock: one writer each.
+SESSIONS_DIR = os.path.join(data_dir(), "sessions")
 
 HEADER = struct.Struct(">I")
 CHUNK = 1 << 20
 
 
-def write_port(port) -> None:
-    """Announce the port the plugin listens on. An empty value erases it."""
-    with open(PORT_FILE, "w") as handle:
-        handle.write(str(port))
+def announce(port: int, facts: dict) -> None:
+    """Write the session file for a listening plugin.
+
+    facts say which Houdini this is: pid, ui, version, product. The bridge shows
+    them, so a caller can tell two sessions apart before it sends a command.
+    """
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    with open(_session_file(port), "w") as handle:
+        json.dump({"port": port, **facts}, handle)
 
 
-def forget_port() -> None:
-    """Erase the announced port, so a dead one does not look like a live Houdini."""
-    write_port("")
-
-
-def read_port():
-    """The port Houdini listens on, or None when no Houdini announced one."""
-    if FORCED_PORT:
-        return FORCED_PORT
+def withdraw(port: int) -> None:
+    """Remove the session file of a plugin that stopped listening."""
     try:
-        with open(PORT_FILE) as handle:
-            return int(handle.read().strip())
-    except (OSError, ValueError):
-        return None
+        os.remove(_session_file(port))
+    except OSError:
+        pass
+
+
+def sessions() -> list:
+    """Every announced session, newest last. The caller must still probe the
+    port: a Houdini that was killed leaves its file behind."""
+    if FORCED_PORT:
+        return [{"port": FORCED_PORT, "source": "HOUDINIMCP_PORT"}]
+    found = []
+    try:
+        names = sorted(os.listdir(SESSIONS_DIR))
+    except OSError:
+        return []
+    for name in names:
+        path = os.path.join(SESSIONS_DIR, name)
+        try:
+            with open(path) as handle:
+                found.append(json.load(handle))
+        except (OSError, ValueError):
+            continue
+    return found
+
+
+def _session_file(port: int) -> str:
+    return os.path.join(SESSIONS_DIR, f"{port}.json")
 
 
 def encode(message) -> bytes:
-    """Make one frame from a JSON-serializable message."""
-    body = json.dumps(message).encode("utf-8")
+    """Make one frame from a message.
+
+    A Houdini value is often an enum or a vector, which JSON does not know.
+    `default=str` writes it as its text instead of raising: a result that holds
+    one such value must not stop the plugin from answering.
+    """
+    body = json.dumps(message, default=str).encode("utf-8")
     return HEADER.pack(len(body)) + body
 
 

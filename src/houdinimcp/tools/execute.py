@@ -7,9 +7,10 @@ MUTATES = True
 MODES = ("python", "hscript", "expression", "vex_check", "env")
 
 
-def run(source=None, mode="python", language="hscript", name=None):
+def run(source=None, mode="python", language="hscript", name=None, file=None,
+        globals=None):
     if mode == "python":
-        return code.execute_code(source, allow_dangerous=True)
+        return code.execute_code(source, True, file, globals)
     if mode == "hscript":
         return code.execute_hscript(source)
     if mode == "expression":

@@ -26,6 +26,10 @@ HEADLESS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(protocol.__file__
 
 _connection = None
 _hython = None
+# The port the caller chose with session action='attach'. Without one the bridge
+# picks, and it refuses to pick when the choice is not obvious.
+_attached_port = None
+_last_session = None
 
 
 class HoudiniError(ToolError):
@@ -100,9 +104,11 @@ class Connection:
             except socket.timeout:
                 self.disconnect()
                 raise HoudiniError(
-                    f"Houdini did not answer '{command['type']}' in {timeout:.0f} seconds. "
-                    f"A cook or a render can take longer. Look at the Houdini window, "
-                    f"then call session with action='status'."
+                    f"Houdini on port {self.port} did not answer '{command['type']}' in "
+                    f"{timeout:.0f} seconds. The work goes on: a timeout stops the wait, "
+                    f"not the cook. Wait, then call session with action='status'. Do not "
+                    f"start a second Houdini. Cook a long frame range in small parts, so "
+                    f"that one call does not hold Houdini past the timeout."
                 )
             except OSError as error:
                 self.disconnect()
@@ -116,7 +122,19 @@ class Connection:
 
 
 def start_hint() -> str:
-    """What the user must do to get a Houdini that answers."""
+    """What the user must do to get a Houdini that answers.
+
+    A Houdini that runs but does not accept is busy, not absent: a cook or a
+    render holds the main thread, and the plugin cannot accept until it ends.
+    To start a second Houdini then is the worst answer, so never say it.
+    """
+    busy = [entry for entry in live_sessions(probe=False) if process_is_alive(entry.get("pid"))]
+    if busy:
+        names = ", ".join(f"pid {entry.get('pid')} on port {entry['port']}"
+                          f"{' (GUI)' if entry.get('ui') else ''}" for entry in busy)
+        return (f"Houdini runs ({names}) and does not answer, so it is busy: a cook, a "
+                f"simulation or a render holds it. Wait and call again. Do not start "
+                f"another Houdini: a second one takes work and memory from this one.")
     if HEADLESS_DISABLED:
         return ("No Houdini listens for the bridge, and HOUDINIMCP_NO_HEADLESS stops the "
                 "bridge from starting one. Start Houdini, or unset that variable.")
@@ -125,6 +143,70 @@ def start_hint() -> str:
                 "Start Houdini, or set HFS to a Houdini install.")
     return ("No Houdini listens for the bridge. Start Houdini, or call session with "
             "action='start' to run a headless one.")
+
+
+def process_is_alive(pid) -> bool:
+    """True when a process with this id runs. Used only to tell 'busy' from
+    'gone', so a reused process id costs nothing."""
+    if not pid:
+        return False
+    if os.name == "nt":
+        import ctypes
+        # SYNCHRONIZE alone: enough to open a live process, and it never asks
+        # for rights that a normal user does not have.
+        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def live_sessions(probe: bool = True) -> list:
+    """Every Houdini that announced itself, with the ones that answer marked.
+
+    A Houdini that was killed leaves its file behind, so the port is the truth.
+    `probe=False` skips the probe, for a message that must not wait.
+    """
+    found = []
+    for entry in protocol.sessions():
+        entry = dict(entry)
+        if probe:
+            # The plugin takes one client at a time, so the socket this bridge
+            # already holds is proof, and a probe on it would be refused.
+            live = _connection is not None and _connection.sock is not None \
+                and _connection.port == entry["port"]
+            entry["answers"] = live or port_is_listening(entry["port"])
+        entry["running"] = process_is_alive(entry.get("pid"))
+        found.append(entry)
+    return found
+
+
+def choose_session(candidates: list) -> dict:
+    """The one session to talk to, from the ones that answer.
+
+    One session is the answer. Several with exactly one graphical session means
+    the user works in that one and the others are strays, so take it and say so.
+    Several graphical sessions is a real choice, and only the caller can make
+    it: it must name a port with session action='attach'.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    with_ui = [entry for entry in candidates if entry.get("ui")]
+    if len(with_ui) == 1:
+        return with_ui[0]
+    names = "; ".join(f"port {entry['port']}: Houdini {entry.get('version', '?')} "
+                      f"{'with a window' if entry.get('ui') else 'headless'}, "
+                      f"pid {entry.get('pid')}, file {entry.get('hip') or 'none'}"
+                      for entry in candidates)
+    raise HoudiniError(
+        f"{len(candidates)} Houdini sessions listen, and the bridge must not guess "
+        f"which one holds your work. {names}. Call session with action='attach' and "
+        f"the port you want.")
 
 
 def find_hython() -> Optional[str]:
@@ -162,9 +244,8 @@ def find_hython() -> Optional[str]:
     return None
 
 
-def port_is_listening(port: int = None, host: str = "localhost") -> bool:
-    """True when the port the plugin announced accepts a connection."""
-    port = port or protocol.read_port()
+def port_is_listening(port: int, host: str = "localhost") -> bool:
+    """True when a plugin accepts a connection on this port."""
     if not port:
         return False
     try:
@@ -189,38 +270,47 @@ def houdini_env() -> dict:
     return environment
 
 
-def _wait_for_port(process: subprocess.Popen, wait_seconds: float) -> bool:
-    """Wait until the port listens. False when the time runs out; raises when
-    the process stops first."""
+def _wait_for_new_session(process: subprocess.Popen, known: set, wait_seconds: float):
+    """Wait for a session that was not there before, and attach to it.
+
+    A new Houdini must not take the place of one that already runs, so the wait
+    looks for a port that is new, not for any port.
+    """
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         if process.poll() is not None:
             output = process.stdout.read().decode(errors="replace")[-800:] if process.stdout else ""
             raise HoudiniError(f"Houdini stopped before it could listen:\n{output}")
-        if port_is_listening():
-            return True
+        for entry in protocol.sessions():
+            if entry["port"] not in known and port_is_listening(entry["port"]):
+                attach(entry["port"])
+                return entry
         time.sleep(0.5)
-    return False
+    return None
 
 
 def start_headless(wait_seconds: float = 90.0) -> str:
-    """Start a headless Houdini and wait for it to listen. Returns what happened."""
+    """Start a headless Houdini and wait for it to listen.
+
+    A Houdini that already runs is left alone: this adds a session, it does not
+    replace one. The bridge then talks to the new one.
+    """
     global _hython
-    if port_is_listening():
-        return "A Houdini already listens on the port."
     hython = find_hython()
     if not hython:
         raise HoudiniError("No hython was found. Set HFS to a Houdini install, or start "
                            "Houdini yourself.")
-    protocol.forget_port()
+    known = {entry["port"] for entry in protocol.sessions()}
     _hython = subprocess.Popen([hython, HEADLESS_SCRIPT], env=houdini_env(),
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
-        if _wait_for_port(_hython, wait_seconds):
-            return f"Headless Houdini is ready on port {protocol.read_port()}."
+        started = _wait_for_new_session(_hython, known, wait_seconds)
     except HoudiniError:
         _hython = None
         raise
+    if started:
+        return (f"A headless Houdini {started.get('version', '')} is ready on port "
+                f"{started['port']}, and this bridge now talks to it.")
     stop_headless()
     raise HoudiniError(f"hython did not listen within {wait_seconds:.0f} seconds. "
                        f"Houdini may want a license. Start Houdini yourself and try again.")
@@ -229,8 +319,6 @@ def start_headless(wait_seconds: float = 90.0) -> str:
 def start_gui(hip: str = None, wait_seconds: float = 240.0) -> str:
     """Start Houdini with its window, apart from the bridge, and wait for the
     plugin to listen. The bridge does not stop it. hip is a file to open."""
-    if port_is_listening():
-        return "A Houdini already listens on the port."
     hython = find_hython()
     houdini = hython and os.path.join(os.path.dirname(hython),
                                       "houdini.exe" if os.name == "nt" else "houdini")
@@ -241,12 +329,19 @@ def start_gui(hip: str = None, wait_seconds: float = 240.0) -> str:
         raise HoudiniError(f"There is no file at {hip}.")
     detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
               if os.name == "nt" else {"start_new_session": True})
-    protocol.forget_port()
-    process = subprocess.Popen([houdini] + ([hip] if hip else []), env=houdini_env(),
+    known = {entry["port"] for entry in protocol.sessions()}
+    # The first start with a new preferences directory opens the usage
+    # statistics question and the Start Here window, both over the viewport.
+    # This is a Houdini that the bridge starts, so the choice is the caller's,
+    # not a change to what the user set.
+    environment = {**houdini_env(), "HOUDINI_NO_START_PAGE_SPLASH": "1"}
+    process = subprocess.Popen([houdini] + ([hip] if hip else []), env=environment,
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, **detach)
-    if _wait_for_port(process, wait_seconds):
-        return f"Houdini {houdini} is ready on port {protocol.read_port()}."
+    started = _wait_for_new_session(process, known, wait_seconds)
+    if started:
+        return (f"Houdini {started.get('version', '')} is ready on port {started['port']}, "
+                f"and this bridge now talks to it.")
     raise HoudiniError(f"Houdini started, but it did not listen within "
                        f"{wait_seconds:.0f} seconds. It may still load, or want a license, "
                        f"or the plugin is not installed: run houdinimcp-install. Look at the "
@@ -273,17 +368,49 @@ def headless_is_ours() -> bool:
     return _hython is not None and _hython.poll() is None
 
 
+def attach(port: int) -> dict:
+    """Send every command from now on to the Houdini on this port."""
+    global _attached_port
+    if not port_is_listening(port):
+        raise HoudiniError(f"No Houdini answers on port {port}. Call session with "
+                           f"action='list' to see the sessions that do.")
+    if _connection is not None and _connection.port != port:
+        _connection.disconnect()
+        _connection.port = port
+    _attached_port = port
+    return {"attached_port": port}
+
+
 def connection(auto_start: bool = True) -> Connection:
-    """The one connection to Houdini. Starts a headless session if none listens."""
+    """The connection to the chosen Houdini. Starts a headless one if none listens."""
     global _connection
     if _connection is None:
         _connection = Connection(host="localhost", port=None)
-    if _connection.sock is None and not port_is_listening() and auto_start \
-            and not HEADLESS_DISABLED:
-        start_headless()
-    if _connection.sock is None:
-        # The plugin picks a free port on every start, so read it again here.
-        _connection.port = protocol.read_port()
+    if _connection.sock is not None:
+        return _connection
+
+    if _attached_port:
+        # A caller that chose a session must never be moved to another one in
+        # silence: a command that lands in the wrong Houdini reads as a scene
+        # that lost its work.
+        if port_is_listening(_attached_port):
+            _connection.port = _attached_port
+            return _connection
+        raise HoudiniError(
+            f"The Houdini on port {_attached_port}, which this session is attached to, "
+            f"stopped answering. Call session with action='list' to see the sessions that "
+            f"are there, then action='attach' with the port you want.")
+
+    answering = [entry for entry in live_sessions() if entry.get("answers")]
+    if not answering:
+        if auto_start and not HEADLESS_DISABLED:
+            start_headless()  # attaches to the session it started
+            answering = [entry for entry in live_sessions() if entry.get("answers")]
+        if not answering:
+            _connection.port = None
+            return _connection
+
+    _connection.port = choose_session(answering)["port"]
     return _connection
 
 
@@ -293,8 +420,10 @@ def status() -> dict:
     report = live.status()
     # The plugin takes one client at a time, so a probe while the bridge holds the
     # socket can time out. A live socket is proof enough.
-    report["port_is_listening"] = live.sock is not None or port_is_listening()
+    report["port_is_listening"] = live.sock is not None or port_is_listening(live.port)
     report["headless_started_by_bridge"] = headless_is_ours()
+    report["attached_port"] = _attached_port
+    report["sessions"] = live_sessions()
     report["hython"] = find_hython()
     return report
 
@@ -305,15 +434,41 @@ def call(command: str, params: Dict[str, Any] = None, timeout: float = 60.0) -> 
     Raises HoudiniError with the next action in the message. Every tool uses
     this, so no tool has to know about the socket.
     """
+    global _last_session
+    started = time.monotonic()
     response = connection().send({"type": command, "params": params or {}}, timeout)
+    _last_session = {**response.get("session", {}), "seconds": round(time.monotonic() - started, 3)}
     if response.get("status") == "error":
-        raise HoudiniError(f"Houdini refused '{command}': {response.get('message', 'no message')}")
+        raise HoudiniError(f"Houdini refused '{command}' ({session_line()}): "
+                           f"{response.get('message', 'no message')}")
     return response.get("result", {})
 
 
+def session_line() -> str:
+    """One line that names the Houdini which answered last.
+
+    A result that does not say which session made it is the most costly failure
+    of this bridge: the caller reads the empty scene of a stray session as a
+    scene that lost its nodes.
+    """
+    if not _last_session:
+        return "no Houdini has answered yet"
+    return (f"Houdini {_last_session.get('version', '?')} "
+            f"{'with a window' if _last_session.get('ui') else 'headless'}, "
+            f"pid {_last_session.get('pid')}, port {_last_session.get('port')}, "
+            f"file {_last_session.get('hip') or 'none'}")
+
+
 def call_json(command: str, params: Dict[str, Any] = None, timeout: float = 60.0) -> str:
-    """`call`, as the JSON text that an MCP tool returns."""
-    return json.dumps(call(command, params, timeout), indent=2, default=str)
+    """`call`, as the JSON text that an MCP tool returns, with the session that
+    answered and the time it took."""
+    result = call(command, params, timeout)
+    if isinstance(result, dict):
+        result = {**result, "_session": session_line(), "_seconds": _last_session["seconds"]}
+    else:
+        result = {"result": result, "_session": session_line(),
+                  "_seconds": _last_session["seconds"]}
+    return json.dumps(result, indent=2, default=str)
 
 
 def shutdown():
@@ -323,3 +478,18 @@ def shutdown():
         _connection.disconnect()
         _connection = None
     stop_headless()
+
+
+def last_version() -> str:
+    """The Houdini build that answered last, for example "21.0.829".
+
+    The documentation must match the session the caller works in, and asking
+    Houdini for its version on every documentation read would need Houdini for
+    a read that does not otherwise touch it.
+    """
+    if _last_session:
+        return _last_session.get("version")
+    for session in protocol.sessions():
+        if session.get("version"):
+            return session["version"]
+    return None

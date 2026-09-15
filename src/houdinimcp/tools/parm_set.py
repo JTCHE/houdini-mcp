@@ -8,8 +8,8 @@ from ..handlers import animation, chops, parameters, rendering
 
 MUTATES = True
 
-MODES = ("value", "expression", "keyframe", "keyframes", "delete_keyframe", "revert",
-         "lock", "link", "spare", "render_settings", "chop_export")
+MODES = ("value", "press", "expression", "keyframe", "keyframes", "delete_keyframe",
+         "revert", "lock", "link", "spare", "render_settings", "chop_export")
 
 
 def run(items=None, mode="value", **defaults):
@@ -26,9 +26,12 @@ def run(items=None, mode="value", **defaults):
 
 def _one(mode, item):
     if mode == "value":
+        follow = item.get("follow_reference", False)
         if "parameters" in item:
-            return parameters.set_parameters(item["path"], item["parameters"])
-        return parameters.set_parameter(item["path"], item["parm"], item["value"])
+            return parameters.set_parameters(item["path"], item["parameters"], follow)
+        return parameters.set_parameter(item["path"], item["parm"], item["value"], follow)
+    if mode == "press":
+        return parameters.press_button(item["path"], item["parm"])
     if mode == "expression":
         from ..handlers import nodes
         return nodes.set_expression(item["path"], item["parm"], item["expression"],

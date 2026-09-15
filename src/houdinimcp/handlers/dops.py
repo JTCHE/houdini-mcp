@@ -102,15 +102,41 @@ def step_simulation(path, num_steps=1):
 
 
 def reset_simulation(path):
-    """Reset a simulation to its initial state."""
+    """Throw away the cache of a simulation, so that the next cook runs it again.
+
+    A solver keeps its result in memory. After a change inside it, the node
+    gives the old result back, with no error and no warning, and the change
+    looks as if it did nothing. This presses the Reset Simulation button of the
+    node and of every DOP network inside it, which is where a solver SOP such
+    as a Pyro, FLIP, Vellum or RBD solver keeps the simulation.
+    """
     node = hou.node(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
-    dop = node.simulation()
-    if not dop:
-        raise ValueError(f"No simulation on: {path}")
-    dop.clear()
-    return {"path": path, "reset": True}
+
+    # Paths, not nodes: a reset rebuilds what is inside a solver SOP, and a node
+    # held from before the reset is gone by the time the walk reaches it.
+    paths = [node.path()] + [child.path() for child in node.allSubChildren()]
+
+    pressed = []
+    for target_path in paths:
+        target = hou.node(target_path)
+        if not target:
+            continue
+        try:
+            for name in ("resimulate", "resetsimulation"):
+                button = target.parm(name)
+                if button:
+                    button.pressButton()
+                    pressed.append(f"{target_path}/{name}")
+        except hou.ObjectWasDeleted:
+            continue
+    if not pressed:
+        raise ValueError(f"{path} has no Reset Simulation button, and neither has any node "
+                         f"inside it. A solver SOP, a DOP network or a node above one of "
+                         f"them can be reset.")
+    return {"path": path, "pressed": pressed,
+            "note": "The next cook runs the simulation again from its start frame."}
 
 
 def get_sim_memory_usage(path):
