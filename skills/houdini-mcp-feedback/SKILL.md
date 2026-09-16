@@ -11,6 +11,11 @@ see the friction that you felt.
 
 Judge the tools, not the Houdini work you produced.
 
+The server is built on one idea: few tools, each one bent by its arguments to
+any task. A finding is worth more when it names the general shape behind it.
+"Pyro needs a density check" is one workflow; "no tool reads the values of a
+volume" is the tool that was missing. Write the second one.
+
 ## 1. Survey yourself
 
 Answer only the questions that this session touched. An answer of "no problem"
@@ -34,7 +39,11 @@ is not an answer to write down: skip that question.
 7. **State you tracked yourself.** Which state did you carry between calls
    (current network, dirty nodes, display against render flag, frame, take,
    a half-wired network) that a tool could have told you?
-8. **Keep this.** One thing that worked, that must not change.
+8. **Execute against named tools.** Did you use `execute` where a named tool
+   existed? Count the calls on each side. For each `execute` call that a named
+   tool could have made: did you know that tool existed, did it lack a field or
+   a mode that you needed, or did one script replace several calls?
+9. **Keep this.** One thing that worked, that must not change.
 
 Lead each point with the concrete finding. No throat-clearing.
 
@@ -44,7 +53,8 @@ Read the vault path from `.env.obsidian` in the repository root, the line
 `OBSIDIAN_VAULT_PATH = <path>`. That file is not in git, and the path must
 never go into a file that is.
 
-The specs live in `<vault>/side projects/Houdini/HoudiniMCP/`.
+The specs live in `<vault>/side projects/Houdini/HoudiniMCP/`, one `.md` file
+for each, next to `HoudiniMCP — Fork.base`, which is the view of them.
 
 **With no vault path, or no such folder:** print the survey in the chat and
 write nothing. Say that the vault path is missing.
@@ -78,6 +88,11 @@ normal prose, for a person who did not see this session.
 `Onboarding` or `Tools`. `Priority` is `P1` for a thing that gives a wrong
 result without an error, `P2` for a thing that costs round trips, `P3` for
 polish.
+
+Write the spec for the person who implements it. Say which tool, which file if
+you know it, what happens now, and what must happen instead. Do not ask for a
+new tool when a mode or an argument on a tool that exists would do: say which
+tool and which argument. Do not ask for anything that only your pipeline needs.
 
 Then tell the user, in the chat, which specs you appended to and which you
 made.

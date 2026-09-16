@@ -1,11 +1,14 @@
 """docs — the official Houdini documentation."""
+import difflib
 import json
 import os
 import re
 import sys
 from urllib.parse import parse_qsl
 
-from ..connection import call
+from houdinimcp import protocol
+
+from ..connection import call, last_version
 
 # Characters in one answer. A client drops a tool result much longer than this,
 # and hou.Geometry alone is 140,000.
@@ -52,7 +55,9 @@ def tool(query: str = None, page: str = None, node: str = None,
     "nodes/sop", "vex/functions" or "hom/hou".
 
     build: read a specific Houdini build, for example "21.0.829". Default: the
-    Houdini in $HFS, then the newest build on this machine.
+    build of the Houdini this bridge talks to, so the page matches the session
+    you work in. Without a session, the Houdini in $HFS, then the newest build
+    on this machine.
 
     section: read only the part of a page under one heading, for example
     "Quick renders and flipbooks". A long page lists its headings.
@@ -67,6 +72,7 @@ def tool(query: str = None, page: str = None, node: str = None,
     if len(given) != 1:
         return "Give exactly one of query, page or node."
 
+    build = build or last_version()
     try:
         docs = reader()
         if query:
@@ -76,7 +82,7 @@ def tool(query: str = None, page: str = None, node: str = None,
             type_name, node_category = meta.get("type_name", ""), meta.get("category", "")
             path = node_page(type_name, node_category, meta.get("default_help_url"))
             try:
-                return excerpt(read(docs, path, build), section, part)
+                return excerpt(read(docs, path, build), section, part, always="Inputs")
             except ValueError:
                 # An asset can carry a help address that has no page, and a
                 # version can lack a page of its own. Try the bare type name,
@@ -84,7 +90,7 @@ def tool(query: str = None, page: str = None, node: str = None,
                 plain = f"nodes/{node_folder(node_category)}/{type_base_name(type_name)}"
                 if plain == path:
                     raise
-                return excerpt(read(docs, plain, build), section, part)
+                return excerpt(read(docs, plain, build), section, part, always="Inputs")
         return excerpt(read(docs, page, build), section, part)
     except ImportError:
         return "Error: the documentation engine is not installed. Run: uv pip install houdinimd-docs"
@@ -101,21 +107,16 @@ def reader():
     global _reader
     if _reader is None:
         import houdinimd_docs
-        _reader = houdinimd_docs.Docs(data_dir())
+        # The same folder that holds the session files. One definition, in
+        # protocol, so the two never drift apart.
+        _reader = houdinimd_docs.Docs(protocol.data_dir())
     return _reader
 
 
-def data_dir() -> str:
-    """HoudiniMCP's own folder, where the documentation index lives. The index
-    fills once per Houdini build, the first time a search needs it."""
-    home = os.path.expanduser("~")
-    if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
-        return os.path.join(base, "HoudiniMCP")
-    if sys.platform == "darwin":
-        return os.path.join(home, "Library", "Application Support", "HoudiniMCP")
-    base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
-    return os.path.join(base, "houdinimcp")
+# Words that carry no meaning in a search and that every page holds anyway.
+COMMON = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+          "how", "do", "does", "i", "my", "is", "it", "that", "this", "can",
+          "what", "when", "use", "using", "houdini", "node", "nodes"}
 
 
 def search(engine, query, limit, category, build):
@@ -123,9 +124,28 @@ def search(engine, query, limit, category, build):
     # needs the wide fetch. Push it into the SQL if a filter comes back short.
     wanted = max(limit * 40, 200) if category else limit
     hits = json.loads(engine.search(query, wanted, build))
+    searched = query
+    if not hits:
+        # Every word must match, so a question written as a sentence matches
+        # nothing at all. Ask for the words one at a time instead and keep the
+        # best score of each page: one word that matches nothing then costs
+        # nothing, where in one OR query it loses every other word with it.
+        words = [word for word in re.findall(r"[\w:.]+", query.lower())
+                 if word not in COMMON and len(word) > 2][:6]
+        if words:
+            searched = ", ".join(words)
+            hits = _best_of(engine, words, wanted, build)
     if category:
         prefix = category.strip("/") + "/"
-        hits = [hit for hit in hits if hit["path"].startswith(prefix)][:limit]
+        hits = [hit for hit in hits if hit["path"].startswith(prefix)]
+    hits = hits[:limit]
+    if not hits:
+        return {"query": query, "searched": searched, "hits": [],
+                "note": ("Nothing in the documentation matched. Try fewer words, "
+                         "or the name of the node or the function itself."
+                         if not category else
+                         f"Nothing under '{category}' matched. Search without a "
+                         f"category, or use another folder.")}
     return [
         {
             "path": hit["path"],
@@ -137,6 +157,25 @@ def search(engine, query, limit, category, build):
         }
         for hit in hits
     ]
+
+
+def _best_of(engine, words, wanted, build):
+    """One search for each word, merged: a page keeps its best score, and a
+    page that answers to more than one word comes first."""
+    found = {}
+    for word in words:
+        try:
+            for hit in json.loads(engine.search(word, wanted, build)):
+                seen = found.get(hit["path"])
+                if seen is None:
+                    hit["words"] = 1
+                    found[hit["path"]] = hit
+                else:
+                    seen["words"] += 1
+                    seen["score"] = max(seen["score"], hit["score"])
+        except ValueError:
+            continue
+    return sorted(found.values(), key=lambda hit: (hit["words"], hit["score"]), reverse=True)
 
 
 def read(engine, reference, build):
@@ -216,24 +255,87 @@ def heading(line: str):
     return None
 
 
-def excerpt(text: str, section: str = None, part: int = 1) -> str:
+# The label of a parameter folder is not always the heading of the section that
+# documents it. These are the ones that differ on most node pages.
+FOLDER_HEADINGS = {
+    "geometry": "Parameters",
+    "attributes": "Attributes",
+    "bindings": "Bindings",
+    "code": "Code",
+    "output": "Output",
+    "inputs": "Inputs",
+    "advanced": "Advanced",
+}
+
+
+def _contents(lines, marks):
+    """A map of a page: each heading with the size of its section.
+
+    A page of 80,000 characters comes in parts, and a reader that must guess
+    which part holds one method reads them all. The size says which section is
+    worth a call.
+    """
+    if not marks:
+        return "The page has no headings."
+    rows = []
+    for number, (start, (level, title)) in enumerate(marks):
+        size = len(_cut(lines, marks, number, start, level))
+        rows.append(f"{'  ' * (level - 2)}{title} ({size} characters)")
+    return "Sections, with the size of each:\n" + "\n".join(rows)
+
+
+def _cut(lines, marks, number, start, level):
+    """The lines of one section: down to the next heading of its level or above."""
+    end = next((index for index, (other, _) in marks[number + 1:] if other <= level),
+               len(lines))
+    return "".join(lines[start:end])
+
+
+def _sections(lines, marks, wanted):
+    """Every section whose heading matches, with the nearest name when none does.
+
+    A heading is rarely spelled the way a caller asks for it, and an answer of
+    "no such section" for a page that holds the answer is the costly failure.
+    """
+    wanted = FOLDER_HEADINGS.get(wanted.strip().lower(), wanted).strip().lower()
+    found = [_cut(lines, marks, number, start, level)
+             for number, (start, (level, title)) in enumerate(marks)
+             if wanted in title.lower()]
+    if found:
+        return found, None
+    titles = [title for _, (_, title) in marks]
+    near = difflib.get_close_matches(wanted, [title.lower() for title in titles], 1, 0.5)
+    if not near:
+        return [], None
+    return ([_cut(lines, marks, number, start, level)
+             for number, (start, (level, title)) in enumerate(marks)
+             if title.lower() == near[0]],
+            f"No section matched exactly; this is '{near[0]}'.")
+
+
+def excerpt(text: str, section: str = None, part: int = 1, always: str = None) -> str:
     """One answer's worth of a page: the sections whose heading holds
-    `section`, cut into parts of at most LIMIT characters at line ends."""
+    `section`, cut into parts of at most LIMIT characters at line ends.
+
+    `always` names a section to add whatever else was asked for. A node page
+    answers half a question without its Inputs: what the node takes decides how
+    to wire it.
+    """
     lines = text.splitlines(keepends=True)
     marks = [(index, found) for index, found in
              ((index, heading(line)) for index, line in enumerate(lines)) if found]
     headings = [title for _, (_, title) in marks]
+    near_note = None
     if section:
-        found = []
-        for number, (start, (level, title)) in enumerate(marks):
-            if section.lower() in title.lower():
-                # A section runs to the next heading of its own level or above.
-                end = next((index for index, (other, _) in marks[number + 1:] if other <= level),
-                           len(lines))
-                found.append("".join(lines[start:end]))
+        found, near_note = _sections(lines, marks, section)
         if not found:
             return f"Error: no section '{section}'. Sections: {'; '.join(headings)}"
+        if always:
+            extra, _ = _sections(lines, marks, always)
+            found += [part for part in extra if part not in found]
         text = "\n".join(found)
+        if near_note:
+            text = near_note + "\n\n" + text
 
     # ponytail: one line longer than LIMIT stays whole. Cut inside the line if
     # a page ever carries one.
@@ -250,8 +352,15 @@ def excerpt(text: str, section: str = None, part: int = 1) -> str:
     if not 1 <= part <= len(parts):
         return f"Error: part must be 1 to {len(parts)}."
     where = (f"Read the next with part={part + 1}" if part < len(parts) else "This is the last part")
-    return (parts[part - 1].rstrip() + f"\n\n---\nPart {part} of {len(parts)}. {where}, "
-            f"or one section with section=. Sections: {'; '.join(headings)}.")
+    answer = (parts[part - 1].rstrip() + f"\n\n---\nPart {part} of {len(parts)}. {where}, "
+              f"or one section with section=.\n\n" + _contents(lines, marks))
+    if always and not section:
+        # The page is long enough to be cut, so the section that says what the
+        # node takes would otherwise be in a part nobody reads.
+        extra, _ = _sections(lines, marks, always)
+        if extra and extra[0] not in answer:
+            answer += f"\n\n---\n{always}, from further down the page:\n\n" + extra[0]
+    return answer
 
 
 if __name__ == "__main__":

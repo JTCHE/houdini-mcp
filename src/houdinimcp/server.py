@@ -1,4 +1,5 @@
 """Houdini-side TCP server that receives JSON commands from the MCP bridge."""
+import os
 import select
 import socket
 import traceback
@@ -11,6 +12,18 @@ from .tools import dispatch
 EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 2)
 EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
+
+
+def identity() -> dict:
+    """Which Houdini this is. Every answer carries it, so a caller can never
+    work in a session that it did not mean to reach."""
+    return {
+        "pid": os.getpid(),
+        "version": hou.applicationVersionString(),
+        "product": hou.applicationName(),
+        "ui": hou.isUIAvailable(),
+        "hip": hou.hipFile.path(),
+    }
 
 
 class HoudiniMCPServer:
@@ -49,7 +62,7 @@ class HoudiniMCPServer:
             ) from error
         self.socket.listen(1)
         self.port = self.socket.getsockname()[1]
-        protocol.write_port(self.port)
+        protocol.announce(self.port, identity())
         self.socket.setblocking(False)
         self.running = True
         if hou.isUIAvailable():
@@ -61,7 +74,12 @@ class HoudiniMCPServer:
         while self.running:
             waiting = [sock for sock in (self.socket, self.client) if sock]
             select.select(waiting, [], [], 0.5)
-            self._process_server()
+            try:
+                self._process_server()
+            except Exception:
+                # The loop must outlive one bad call. A plugin that stops here
+                # reads to the caller as a Houdini that is not running.
+                traceback.print_exc()
 
     def stop(self):
         """Stop listening and close the sockets."""
@@ -72,7 +90,7 @@ class HoudiniMCPServer:
         if self.socket:
             self.socket.close()
         self.socket = None
-        protocol.forget_port()
+        protocol.withdraw(self.port)
         print("HoudiniMCP server stopped")
 
     def _drop_client(self):
@@ -107,7 +125,17 @@ class HoudiniMCPServer:
 
             commands, self.buffer = protocol.decode(self.buffer)
             for command in commands:
-                response = protocol.encode(self.execute_command(command))
+                try:
+                    response = protocol.encode(self.execute_command(command))
+                except Exception as error:
+                    # A result that cannot be written must not stop the plugin.
+                    # Without this, one bad value ends the session and every
+                    # later call reports that Houdini is not running.
+                    traceback.print_exc()
+                    response = protocol.encode({
+                        "status": "error",
+                        "message": f"The result of '{command.get('type')}' could not be "
+                                   f"sent: {type(error).__name__}: {error}"})
                 self.client.setblocking(True)
                 self.client.sendall(response)
                 self.client.setblocking(False)
@@ -116,10 +144,16 @@ class HoudiniMCPServer:
             self._drop_client()
 
     def execute_command(self, command):
-        """Run one tool and wrap the answer for the bridge."""
+        """Run one tool and wrap the answer for the bridge.
+
+        Every answer names the session that made it. The scene file can change
+        between two calls, so the identity is read now, not at start.
+        """
         try:
             result = dispatch(command.get("type", ""), command.get("params", {}))
-            return {"status": "success", "result": result}
+            answer = {"status": "success", "result": result}
         except Exception as error:
             traceback.print_exc()
-            return {"status": "error", "message": f"{type(error).__name__}: {error}"}
+            answer = {"status": "error", "message": f"{type(error).__name__}: {error}"}
+        answer["session"] = {**identity(), "port": self.port}
+        return answer

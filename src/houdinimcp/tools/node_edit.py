@@ -44,7 +44,8 @@ def _one(mode, item):
         if context == "material_network":
             return materials.create_material_network(parent_path, name or "matnet")
         return nodes.create_node(node_type, parent_path, name,
-                                 item.get("position"), item.get("parameters"))
+                                 item.get("position"), item.get("parameters"),
+                                 item.get("input_path"))
     if mode == "delete":
         return nodes.delete_node(item["path"])
     if mode == "copy":
@@ -62,15 +63,19 @@ def _one(mode, item):
     if mode == "color":
         return nodes.set_node_color(item["path"], item["color"])
     if mode == "layout":
-        return nodes.layout_children(item.get("path", "/obj"))
+        return nodes.layout_children(item.get("path", "/obj"), item.get("paths"))
     if mode == "wrangle":
-        if "code" in item and "path" in item:
-            return vex.set_wrangle_code(item["path"], item["code"])
+        if item.get("path"):
+            return vex.write_snippet(item["path"], code=item.get("code"),
+                                     code_file=item.get("code_file"),
+                                     replace=item.get("replace"),
+                                     parm=item.get("parm", "snippet"))
         if item.get("attrib_name"):
             return vex.create_vex_expression(item["parent_path"], item["attrib_name"],
                                              item["expression"], item.get("run_over", "Points"))
         return vex.create_wrangle(item["parent_path"], item.get("wrangle_type", "attribwrangle"),
-                                  item.get("name"), item.get("code", ""))
+                                  item.get("name"), item.get("code", ""),
+                                  item.get("code_file"), item.get("input_path"))
     if mode == "material":
         return nodes.set_material(item["path"], item.get("material_type", "principledshader"),
                                   item.get("name"), item.get("parameters"))

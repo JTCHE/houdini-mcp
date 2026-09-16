@@ -1,10 +1,11 @@
-"""parm_set — write parameters, expressions, keyframes and links."""
-from typing import Any, Dict, List, Union
+"""parm_set — write parameters, press buttons, write expressions and keyframes."""
+from typing import Any, Dict, List, Optional, Union
 
 from ..connection import call_json
 
 
-def tool(mode: str = "value", items: Union[Dict[str, Any], List[Dict[str, Any]]] = None,
+def tool(mode: str = "value",
+         items: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
          path: str = None, parm: str = None, value: Any = None,
          parameters: Dict[str, Any] = None, expression: str = None,
          language: str = "hscript", frame: float = None,
@@ -12,19 +13,33 @@ def tool(mode: str = "value", items: Union[Dict[str, Any], List[Dict[str, Any]]]
          src_path: str = None, src_parm: str = None, name: str = None,
          label: str = None, parm_type: str = None, default: Any = None,
          settings: Dict[str, Any] = None, chop_path: str = None,
-         channel_name: str = None) -> str:
-    """Write parameter values. One write, or a list in one undo group.
+         channel_name: str = None, follow_reference: bool = False) -> str:
+    """Write parameter values, or press a button. One write, or a list in one
+    undo group.
 
     Use it after node_inspect has confirmed the parameter name and the type.
 
-    A write can be accepted and have no effect: a parameter that carries an
-    expression keeps the expression, and an animated parameter takes the value
-    as a new key. The result says which happened, and lists the writes that did
-    not take. Read that list before you report success.
+    A write can be accepted and change nothing, and Houdini says nothing. This
+    tool looks for all five causes and names the one it found:
+      - the parameter carries an expression, which still decides the value;
+      - the parameter is animated, so the value became a new key;
+      - the parameter is locked;
+      - another parameter disables it, so the cook does not read it;
+      - the parameter reads another node through a channel reference, so the
+        write would change that other node. It is refused; give
+        `follow_reference=true` to write the node at the other end.
+    Read `warnings` and `not_applied` in the result before you report success.
 
     mode, and the arguments that each mode reads:
         "value"           — path, parm, value. Or path and parameters, a
-                            dictionary of several names and values.
+                            dictionary of several names and values. A menu
+                            takes its token, for example "custom".
+        "press"           — path, parm: press a button, for example Save to
+                            Disk on a File Cache, Reload on a File SOP, or
+                            Resimulate on a solver. The result holds the errors
+                            and the warnings of the node after the press,
+                            because work that a button starts fails later and
+                            in silence.
         "expression"      — path, parm, expression, language ("hscript" or
                             "python").
         "keyframe"        — path, parm, frame, value.
@@ -55,5 +70,6 @@ def tool(mode: str = "value", items: Union[Dict[str, Any], List[Dict[str, Any]]]
         ("src_parm", src_parm), ("name", name), ("label", label),
         ("parm_type", parm_type), ("default", default), ("settings", settings),
         ("chop_path", chop_path), ("channel_name", channel_name),
+        ("follow_reference", follow_reference or None),
     ) if given is not None})
     return call_json("parm_set", arguments)

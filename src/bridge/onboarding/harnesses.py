@@ -2,7 +2,10 @@
 
 Every harness runs the same command and differs only in where that command is
 written. The command is `houdinimcp-bridge` from an installed package, and
-`uv --directory <repo> run python houdini_mcp_server.py` from a checkout.
+`uv --directory <repo> run --frozen python houdini_mcp_server.py` from a
+checkout. `--frozen` is not an option: without it `uv run` resolves and syncs
+before every start, so one dependency that no index can serve takes a working
+setup away in the middle of a session.
 """
 import json
 import os
@@ -24,7 +27,11 @@ def server_command(repo_dir: str = None) -> dict:
     if repo_dir:
         return {
             "command": "uv",
-            "args": ["--directory", repo_dir, "run", "python", "houdini_mcp_server.py"],
+            # --frozen: start with the lock that is in the checkout. Without
+            # it, uv resolves first, and a dependency that no index has stops
+            # a bridge that worked a minute ago.
+            "args": ["--directory", repo_dir, "run", "--frozen", "python",
+                     "houdini_mcp_server.py"],
         }
     return {"command": _bridge_script(), "args": []}
 

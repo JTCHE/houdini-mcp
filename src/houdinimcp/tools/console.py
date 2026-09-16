@@ -13,7 +13,8 @@ from ..handlers import nodes
 MUTATES = False
 
 
-def run(limit=100, severity=None, source=None, node_errors=True, root_path="/obj"):
+def run(limit=100, severity=None, source=None, node_errors=True,
+        root_path="/obj", node_limit=20):
     """severity: one of 'message', 'important', 'warning', 'error', 'fatal'."""
     sink = hou.logging.defaultSink(True)
     entries = []
@@ -34,5 +35,5 @@ def run(limit=100, severity=None, source=None, node_errors=True, root_path="/obj
     report = {"count": len(entries), "log": entries[-limit:]}
     if node_errors:
         # A cook error also hides behind an empty geometry result, so read it here.
-        report["node_errors"] = nodes.find_error_nodes(root_path)
+        report["node_errors"] = nodes.find_error_nodes(root_path, node_limit)
     return report

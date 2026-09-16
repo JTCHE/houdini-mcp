@@ -1,41 +1,51 @@
 """What one node is: type, parameters, code, errors, and what feeds it."""
 from . import as_list, unknown_mode
 from ..handlers import animation, cache, chops, context, cops, dops, materials, nodes, \
-    parameters, rendering, vex
+    parameters, rendering, timing, vex
 
 MUTATES = False
 
-MODES = ("info", "parms", "schema", "changed", "expression", "keyframes", "code",
+MODES = ("info", "parms", "schema", "changed", "names", "expression", "keyframes", "code",
          "cook_chain", "explain", "material", "image", "channels", "simulation",
-         "render_settings", "cache")
+         "render_settings", "cache", "time_dependency", "validate")
 
 
 def run(paths, mode="info", parm=None, include_all_parms=False, object_name=None,
-        field_name=None, channel=None, start=None, end=None):
+        field_name=None, channel=None, start=None, end=None, pattern=None,
+        has_expression=False, frames=None):
     """Inspect one node or a list of nodes. Every result names its path."""
     results = []
     for path in as_list(paths):
         try:
             results.append({"path": path, "result": _one(
                 path, mode, parm, include_all_parms, object_name, field_name,
-                channel, start, end)})
+                channel, start, end, pattern, has_expression, frames)})
         except Exception as error:
             # A list must not lose the nodes after the one that failed.
             results.append({"path": path, "error": f"{type(error).__name__}: {error}"})
     return results[0] if len(results) == 1 else {"count": len(results), "nodes": results}
 
 
-def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, start, end):
+def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, start, end,
+         pattern=None, has_expression=False, frames=None):
+    if mode == "time_dependency":
+        return nodes.time_dependency(path, frames)
+    if frames:
+        # The same mode at each frame, with the playbar put back after.
+        return timing.at_frames(frames, lambda: _one(
+            path, mode, parm, include_all_parms, object_name, field_name, channel,
+            start, end, pattern, has_expression))
     if mode == "info":
         return nodes.get_node_info(path, include_all_parms)
     if mode == "parms":
-        if parm:
-            return parameters.get_parameter(path, parm)
-        return nodes.get_node_info(path, include_all_parms=True)["parameters"]
+        return parameters.get_parameters(path, parm, pattern, has_expression)
     if mode == "schema":
-        return parameters.get_parameter_schema(path)
+        return parameters.get_parameter_schema(path, parm, pattern)
     if mode == "changed":
-        return nodes.get_changed_parms(path)
+        return parameters.get_parameters(path, parm, pattern, has_expression,
+                                         changed_only=True)
+    if mode == "names":
+        return nodes.name_parameters(path, pattern)
     if mode == "expression":
         _needs(parm, "expression", "a parameter name")
         return parameters.get_expression(path, parm)
@@ -70,6 +80,8 @@ def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, 
         return rendering.get_render_settings(path)
     if mode == "cache":
         return cache.get_cache_status(path)
+    if mode == "validate":
+        return nodes.validate_names(path)
     raise unknown_mode(mode, MODES)
 
 
