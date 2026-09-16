@@ -9,8 +9,11 @@ root. That file is not in git, and the path must never go into a file that is.
 **Folder:** `<vault>/side projects/Houdini/HoudiniMCP/`
 **Base:** `HoudiniMCP — Fork.base` in that folder, which is the view of it.
 
-Every `.md` file in the folder next to the base is a spec, except
-`HoudiniMCP — Mission Statement.md` and the base files themselves.
+Specs live under `specs/<Type>/<Status>/` in that folder (e.g.
+`specs/Issue/Open/`, `specs/Feature/Closed/`), sorted there by the Advanced
+Note Mover plugin. A `.md` file directly in the folder, next to the base, is
+not a spec: it is either `HoudiniMCP — Mission Statement.md`, a base file, or
+an undated feedback log with no `Type`/`Status` frontmatter.
 
 ## Spec format
 
@@ -38,8 +41,7 @@ That prompt is the whole brief. This is what it means.
 5. Test each change in a live Houdini before you call it done. Start your own
    session: never work in the Houdini the user has open. See
    [Testing](testing.md) and [Deployment](deployment.md).
-6. When a change answers a spec, append one dated line to that spec saying what
-   was done. **Never set `Status` yourself.** Only the user closes a spec.
+6. When a change answers a spec, set `Status: Closed`.
 
 A spec that turns out to be wrong, or that the mission rules out, gets the same
 dated line saying that, and why. Say it in the chat as well.
