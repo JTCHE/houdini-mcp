@@ -235,6 +235,23 @@ def _pi_configure(repo_dir: str, dry_run: bool) -> str:
     return f"{path} (pi reads it through pi-mcp-adapter: pi install npm:pi-mcp-adapter)"
 
 
+# ── Oh My Pi (OMP) ──
+
+def _omp_dir() -> str:
+    # OMP's user agent dir. PI_CONFIG_DIR renames the .omp config root.
+    root = os.environ.get("PI_CONFIG_DIR") or ".omp"
+    return _home(root, "agent")
+
+
+def _omp_detect() -> bool:
+    return bool(shutil.which("omp")) or os.path.isdir(_home(os.environ.get("PI_CONFIG_DIR") or ".omp"))
+
+
+def _omp_configure(repo_dir: str, dry_run: bool) -> str:
+    # OMP reads mcpServers natively from ~/.omp/agent/mcp.json — no adapter.
+    return _write_json_server(os.path.join(_omp_dir(), "mcp.json"), repo_dir, dry_run)
+
+
 class Harness:
     def __init__(self, key, label, detect, configure):
         self.key = key
@@ -255,6 +272,7 @@ HARNESSES = [
     Harness("cursor", "Cursor", _cursor_detect, _cursor_configure),
     Harness("opencode", "opencode", _opencode_detect, _opencode_configure),
     Harness("pi", "pi", _pi_detect, _pi_configure),
+    Harness("omp", "Oh My Pi", _omp_detect, _omp_configure),
 ]
 
 BY_KEY = {harness.key: harness for harness in HARNESSES}
