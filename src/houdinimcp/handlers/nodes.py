@@ -1,6 +1,8 @@
 """Node CRUD, wiring, flags, layout, and material handlers."""
+import re
+
 import hou
-from .parameters import inert
+from .parameters import inert, matches
 
 
 def create_node(node_type, parent_path="/obj", name=None, position=None, parameters=None,
@@ -555,11 +557,9 @@ def name_parameters(path, pattern=None):
         raise ValueError(f"Node not found: {path}")
     found = []
     for parm in node.parms():
-        label = parm.parmTemplate().label()
-        if pattern and pattern.lower() not in parm.name().lower() \
-                and pattern.lower() not in label.lower():
+        if not matches(parm, pattern):
             continue
-        found.append({"name": parm.name(), "label": label,
+        found.append({"name": parm.name(), "label": parm.parmTemplate().label(),
                       "type": parm.parmTemplate().type().name()})
     return {"path": path, "count": len(found), "parameters": found}
 
@@ -594,6 +594,33 @@ def _known_names(node):
     return {kind: sorted(value) for kind, value in names.items()}
 
 
+def _class_fixes(node):
+    """Parameters that name an attribute without the class prefix it needs.
+
+    Some nodes read "point.v", not "v". With the bare name they cook with no
+    error, skip the attribute, and say so only in a warning.
+    """
+    fixes = []
+    for warning in node.warnings():
+        found = re.search(r"unrecognized class.*:\s*(\S+)\s*$", warning)
+        if not found:
+            continue
+        name = found.group(1)
+        classes = [kind for kind, find in (("point", "findPointAttrib"),
+                                           ("vertex", "findVertexAttrib"),
+                                           ("prim", "findPrimAttrib"))
+                   if any(getattr(source.geometry(), find)(name)
+                          for source in node.inputs() if source and source.geometry())]
+        for parm in node.parms():
+            if parm.parmTemplate().type() == hou.parmTemplateType.String                     and parm.evalAsString() == name:
+                fixes.append({"parm": parm.name(), "value": name,
+                              "write": f"{classes[0]}.{name}" if classes else None,
+                              "why": f"the node needs the class before the name. It said: "
+                                     f"{warning}" + ("" if classes else
+                                                     f" No input carries {name}.")})
+    return fixes
+
+
 def validate_names(path):
     """Find parameters that name an attribute, group or field that does not exist.
 
@@ -624,8 +651,15 @@ def validate_names(path):
             continue
         unmatched.append({"parm": parm.name(), "label": parm.parmTemplate().label(),
                           "value": value})
+    report = {"path": path}
+    fixes = _class_fixes(node)
+    if fixes:
+        # First in the answer: a node warning inside a long report reads as a
+        # broken node, when the fix is one value.
+        report["fix_first"] = fixes
     return {
-        "path": path, "reads_geometry_from": [one.path() for one in node.inputs() if one],
+        **report,
+        "reads_geometry_from": [one.path() for one in node.inputs() if one],
         "names_nothing": unmatched,
         "available": known,
         "note": ("Each parameter in names_nothing holds a bare name that no attribute, "

@@ -511,6 +511,19 @@ def get_parameter_schema(node_path, parm=None, pattern=None):
     return {"path": node_path, "count": len(schema), "parameters": schema}
 
 
+def matches(parm, pattern):
+    """True when the name or the label of `parm` matches `pattern`.
+
+    `|` separates alternatives, for example "time|step|cfl". Each one is a
+    glob or a part of the name or of the label, with no case.
+    """
+    if not pattern:
+        return True
+    name, label = parm.name().lower(), parm.parmTemplate().label().lower()
+    return any(one and (fnmatch.fnmatch(name, one) or one in name or one in label)
+               for one in (part.strip() for part in pattern.lower().split("|")))
+
+
 def _selected_parms(node, parm=None, pattern=None):
     """The parameters that a caller asked for: one name, a pattern, or all."""
     if parm:
@@ -518,28 +531,61 @@ def _selected_parms(node, parm=None, pattern=None):
         if not one:
             raise ValueError(_no_such(node, parm))
         return [one]
-    if pattern:
-        return [one for one in node.parms()
-                if fnmatch.fnmatch(one.name(), pattern)
-                or pattern.lower() in one.name().lower()
-                or pattern.lower() in one.parmTemplate().label().lower()]
-    return list(node.parms())
+    return [one for one in node.parms() if matches(one, pattern)]
+
+
+# Templates that hold no value a person sets: they lay out the pane.
+_LAYOUT = {"Folder", "FolderSet", "Label", "Separator", "Button"}
+
+
+def _ramp_of(parm):
+    """The ramp parameter that `parm` is a key of, or None."""
+    parent = parm.parentMultiParm()
+    return parent if parent and parent.parmTemplate().type() == hou.parmTemplateType.Ramp \
+        else None
+
+
+def _ramp_summary(parm):
+    """One entry for a whole ramp: its keys, as (position, value) pairs."""
+    ramp = parm.evalAsRamp()
+    values = [tuple(round(part, 3) for part in value) if isinstance(value, tuple)
+              else round(value, 3) for value in ramp.values()]
+    return {"name": parm.name(), "label": parm.parmTemplate().label(), "type": "Ramp",
+            "key_count": len(ramp.keys()),
+            "keys": [[round(key, 3), value] for key, value in zip(ramp.keys(), values)][:12]}
 
 
 def get_parameters(node_path, parm=None, pattern=None, has_expression=False,
-                   changed_only=False):
+                   changed_only=False, fields=None):
     """Read the parameters of a node, with a filter.
 
     `changed_only` keeps a parameter that is not at its default, that carries an
     expression, or that has keys. An expression usually sits on a parameter that
     is at its default value, so a filter on the value alone hides the part that
-    makes a scene time dependent.
+    makes a scene time dependent. It leaves out what a person does not set:
+    folders, labels, buttons and parameters that the template hides. A ramp is
+    one entry, not one entry for each key.
+
+    `fields` keeps only these keys of each entry, for example
+    ["value", "expression"]. The name is always kept.
     """
     node = _node(node_path)
-    found = []
+    found, ramps = [], []
     for one in _selected_parms(node, parm, pattern):
+        template = one.parmTemplate()
+        if changed_only:
+            if template.type().name() in _LAYOUT or template.isHidden():
+                continue
+            # A key of a ramp is not at its template default even when the
+            # ramp is at the default of the node, so the ramp itself decides.
+            if _ramp_of(one) is not None:
+                continue
+            if template.type() == hou.parmTemplateType.Ramp:
+                if not one.isAtRampDefault():
+                    ramps.append(one)
+                continue
         expression = _expression(one)
-        keys = one.keyframes() if not _expression(one) else ()
+        keys = one.keyframes() if not expression else ()
         if has_expression and not expression:
             continue
         reasons = []
@@ -555,8 +601,24 @@ def get_parameters(node_path, parm=None, pattern=None, has_expression=False,
         if reasons:
             report["in_list_because"] = reasons
         found.append(report)
+    if fields:
+        found = [{key: report[key] for key in ["name", *fields] if key in report}
+                 for report in found]
+    found += [_ramp_summary(ramp) for ramp in ramps]
     return {"path": node_path, "count": len(found),
             "parameter_count": len(node.parms()), "parameters": found}
+
+
+def readers(node_path, parm_name):
+    """The parameters that read this one through a channel reference or an
+    expression. A change here changes each of them."""
+    node = _node(node_path)
+    parm = node.parm(parm_name)
+    if not parm:
+        raise ValueError(_no_such(node, parm_name))
+    found = [{"path": other.path(), "expression": _expression(other)}
+             for other in parm.parmsReferencingThis() if other.path() != parm.path()]
+    return {"path": node_path, "parm": parm_name, "count": len(found), "read_by": found}
 
 
 def get_expression(node_path, parm_name):
