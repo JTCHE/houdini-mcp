@@ -3,20 +3,20 @@
 A write can be accepted and have no effect, so each result says what the
 parameter holds after the write.
 """
-from . import as_list, unknown_mode
-from ..handlers import animation, chops, parameters, rendering
+from . import items_of, unknown_mode
+from ..handlers import animation, chops, parameters, rendering, snapshots, spares
 
 MUTATES = True
 
 MODES = ("value", "press", "expression", "keyframe", "keyframes", "delete_keyframe",
-         "revert", "lock", "link", "spare", "render_settings", "chop_export")
+         "revert", "lock", "link", "spare", "render_settings", "chop_export", "snapshot",
+         "restore", "diff")
 
 
 def run(items=None, mode="value", **defaults):
     """Run one mode over one item or a list of items."""
     results = []
-    for item in as_list(items) or [{}]:
-        arguments = {**defaults, **item}
+    for arguments in items_of(mode, items, defaults):
         try:
             results.append(_one(mode, arguments))
         except Exception as error:
@@ -50,13 +50,26 @@ def _one(mode, item):
         return parameters.link_parameters(item["src_path"], item["src_parm"],
                                           item["path"], item["parm"])
     if mode == "spare":
-        if "parameters" in item:
-            return parameters.create_spare_parameters(item["path"], item["parameters"])
-        return parameters.create_spare_parameter(item["path"], item["name"], item["label"],
-                                                 item["parm_type"], item.get("default"))
+        specs = item.get("parameters") or [{
+            key: given for key, given in (
+                ("name", item["name"]), ("label", item.get("label")),
+                ("type", item.get("parm_type")), ("default", item.get("default")),
+                ("expression", item.get("expression"))) if given is not None}]
+        return spares.add_spare_parameters(item["path"], specs)
     if mode == "render_settings":
         return rendering.set_render_settings(item["path"], item["settings"])
     if mode == "chop_export":
         return chops.export_chop_to_parm(item["chop_path"], item["channel_name"],
                                          item["path"], item["parm"])
+    if mode == "snapshot":
+        return snapshots.snapshot(item["name"], item.get("paths") or [item["path"]])
+    if mode == "restore":
+        return snapshots.restore(item["name"], _paths(item))
+    if mode == "diff":
+        return snapshots.diff(item["name"], _paths(item))
     raise unknown_mode(mode, MODES)
+
+
+def _paths(item):
+    """The nodes a restore or a diff is limited to, or None for the whole record."""
+    return item.get("paths") or ([item["path"]] if item.get("path") else None)

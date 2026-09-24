@@ -219,6 +219,49 @@ def kept_display(node_path):
                 pass
 
 
+@contextmanager
+def kept_network(viewer, node_path):
+    """Show the network of a node in the viewer for the capture, and the old
+    network after. A viewer on another network draws nothing of the node."""
+    node = hou.node(node_path) if node_path else None
+    before = viewer.pwd()
+    network = node.parent() if node is not None else None
+    if network is None or network == before:
+        yield None
+        return
+    viewer.setPwd(network)
+    try:
+        yield {"from": before.path(), "to": network.path()}
+    finally:
+        try:
+            viewer.setPwd(before)
+        except hou.Error:
+            pass
+
+
+def orbit(port, azimuth=None, elevation=None):
+    """Turn the view around its pivot: azimuth around the up axis, elevation
+    above the ground, both in degrees. 0 and 0 look along -Z, from the front.
+
+    The camera of a viewport holds the transpose of the matrix that
+    `hou.hmath` builds, so every rotation that goes in is transposed."""
+    camera = port.defaultCamera()
+    rotate = hou.hmath.buildRotate(hou.Vector3(-float(elevation or 0.0),
+                                               float(azimuth or 0.0), 0.0))
+    camera.setRotation(rotate.extractRotationMatrix3().transposed())
+    port.setDefaultCamera(camera)
+    port.useDefaultCamera()
+
+
+def _view(port):
+    """Where the view is now: pivot, the position of the eye and the distance."""
+    pivot = hou.Vector3(port.defaultCamera().pivot())
+    eye = hou.Vector3(0.0, 0.0, 0.0) * port.viewTransform()
+    return {"target": [round(value, 4) for value in pivot],
+            "look_from": [round(value, 4) for value in eye],
+            "radius": round((eye - pivot).length(), 4)}
+
+
 def aim(port, target=None, look_from=None, radius=None):
     """Point the view at a place in the scene.
 
@@ -233,7 +276,7 @@ def aim(port, target=None, look_from=None, radius=None):
         to = hou.Vector3(target) if target is not None else camera.pivot()
         rotate = hou.hmath.buildRotateLookAt(hou.Vector3(look_from), to,
                                              hou.Vector3(0, 1, 0))
-        camera.setRotation(rotate.extractRotationMatrix3())
+        camera.setRotation(rotate.extractRotationMatrix3().transposed())
         if radius is None:
             radius = (hou.Vector3(look_from) - to).length()
     if radius is not None:
@@ -275,7 +318,8 @@ def fit(port, what, fill=0.9):
 
 
 def write_image(viewer, port, output=None, resolution=None, frames=None):
-    """Write the viewport to a file, and confirm that the file is new.
+    """Write the viewport to a file, and confirm that the file is new and
+    holds more than the background.
 
     hou.GeometryViewport has no image export in 21.0 or 22.0, so this is a
     flipbook of one frame. An image left by an earlier call must not pass for
@@ -295,16 +339,35 @@ def write_image(viewer, port, output=None, resolution=None, frames=None):
     settings.output(output)
     settings.outputToMPlay(False)
     if resolution:
+        # A size of another shape than the viewport stretches the picture, so
+        # the width decides and the height keeps the shape of the viewport.
+        width, height = port.resolutionInPixels()
+        resolution = [int(resolution[0]), max(2, round(int(resolution[0]) * height / width))]
         settings.useResolution(True)
-        settings.resolution((int(resolution[0]), int(resolution[1])))
+        settings.resolution(tuple(resolution))
     viewer.flipbook(port, settings)
     if frames:
         return {"filepath": output, "frame_range": [start, end]}
     if not os.path.exists(output) or os.path.getmtime(output) == before:
         raise RuntimeError(f"The flipbook wrote no image at {output}")
+    if blank(output):
+        raise RuntimeError(f"The picture at {output} holds only one colour: the view shows "
+                           f"nothing of the scene. Frame the node with `frame`, or check "
+                           f"its display flag and the network the viewer shows.")
     return {"filepath": output,
-            "resolution": ([int(resolution[0]), int(resolution[1])] if resolution
-                           else list(port.resolutionInPixels()))}
+            "resolution": resolution or list(port.resolutionInPixels())}
+
+
+def blank(path):
+    """True when every pixel on a coarse grid of the picture has one colour."""
+    from PySide6.QtGui import QImage
+    image = QImage(path)
+    if image.isNull():
+        return False
+    width, height = image.width(), image.height()
+    colours = {image.pixel(width * column // 16, height * row // 16)
+               for column in range(16) for row in range(16)}
+    return len(colours) == 1
 
 
 def new_file(stem, suffix):
@@ -329,19 +392,22 @@ def _numbered(output, name):
 
 def capture(mode="viewport", node=None, output=None, camera=None, direction=None,
             shading=None, renderer=None, frame=None, target=None, look_from=None,
-            radius=None, fill=0.9, frame_range=None, frames=None, resolution=None):
+            radius=None, fill=0.9, frame_range=None, frames=None, resolution=None,
+            azimuth=None, elevation=None):
     """One picture of the viewport, or four, with the view put back after.
 
     Every argument that moves the view is undone when the file is written, so
     a capture never leaves the window of the user somewhere else.
     """
+    from . import timing
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
     port = viewer.curViewport()
     aimed = target is not None or look_from is not None or radius is not None
+    orbited = azimuth is not None or elevation is not None
 
-    with kept_display(node), kept_view(port):
+    with kept_display(node), kept_network(viewer, node) as switched, kept_view(port):
         if camera:
             set_viewport_camera(camera)
         if direction:
@@ -352,6 +418,8 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
             set_viewport_renderer(renderer)
         # A node to look at is a node to frame, unless the caller aims by hand.
         framed = fit(port, frame or (None if aimed or not node else node), fill)
+        if orbited:
+            orbit(port, azimuth, elevation)
         if aimed:
             aim(port, target, look_from, radius)
 
@@ -370,10 +438,24 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
                 shot = write_image(viewer, port, _numbered(output, name), resolution)
                 images.append({"view": name, **shot})
             report = {"images": images, "filepath": images[-1]["filepath"]}
+        elif frames is not None:
+            images = []
+            with timing.keep_frame():
+                for number in timing.frame_list(frames):
+                    hou.setFrame(number)
+                    shot = write_image(viewer, port, _numbered(output, f"{number:g}"),
+                                       resolution)
+                    images.append({"frame": number, **shot})
+            report = {"images": images, "filepath": images[0]["filepath"]}
         else:
             report = write_image(viewer, port, output, resolution)
+        if aimed or orbited:
+            report["view"] = _view(port)
     report["framed"] = framed
     report["displayed"] = node
+    if switched:
+        report["viewer_network"] = (f"The viewer showed {switched['from']}, so it showed "
+                                    f"{switched['to']} for the picture and went back after.")
     return report
 
 

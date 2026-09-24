@@ -9,7 +9,8 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
          field_name: str = None, channel: str = None,
          start: float = None, end: float = None, pattern: str = None,
          has_expression: bool = False,
-         frames: Union[float, List[float], Dict[str, float]] = None) -> str:
+         frames: Union[float, List[float], Dict[str, float]] = None,
+         fields: List[str] = None) -> str:
     """Read one node, or a list of nodes, without changing anything.
 
     Use it before you write: to confirm a parameter name, to see whether a
@@ -28,8 +29,10 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
                             from an expression.
         "schema"          — the parameter templates: types, ranges, menus.
                             Read this before you write a menu parameter.
-        "changed"         — only the parameters that are not at their default,
-                            with the expressions and the channel references.
+        "changed"         — only the parameters that a person set: not at the
+                            default, or with an expression or keys. Folders,
+                            labels, buttons and hidden fields are left out, and
+                            a ramp is one entry with its keys.
         "names"           — the names of the parameters, and nothing else. Read
                             this first when you do not know the name to write.
         "expression"      — the expression on `parm`, and its language.
@@ -52,9 +55,19 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
                             nothing: a group, an attribute or a volume that the
                             input geometry does not hold. That is the failure
                             that gives a wrong result with no error.
+        "layout"          — for a network: each node that sits above its input,
+                            and each pair of nodes in one slot, where one name
+                            covers the other. Read it after you add nodes.
+        "readers"         — the parameters that read `parm` through a channel
+                            reference or an expression: what else a write to
+                            it changes.
 
-    pattern: keep the parameters whose name or label holds this text.
+    pattern: keep the parameters whose name or label holds this text, or
+    matches it as a glob. "|" separates alternatives: "time|step|cfl".
     has_expression: keep only the parameters that carry an expression.
+    fields: keep only these keys of each parameter in "parms" and "changed",
+    for example ["value", "expression"]. The name is always kept. A solver has
+    hundreds of parameters: give pattern or fields.
 
     frames: read the same mode at another frame, or at several: one frame, a
     list of frames, or {"start": 1, "end": 10, "step": 2}. The playbar goes
@@ -68,4 +81,5 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
         "include_all_parms": include_all_parms, "object_name": object_name,
         "field_name": field_name, "channel": channel, "start": start, "end": end,
         "pattern": pattern, "has_expression": has_expression, "frames": frames,
+        "fields": fields,
     })

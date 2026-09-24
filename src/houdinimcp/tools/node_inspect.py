@@ -7,19 +7,25 @@ MUTATES = False
 
 MODES = ("info", "parms", "schema", "changed", "names", "expression", "keyframes", "code",
          "cook_chain", "explain", "material", "image", "channels", "simulation",
-         "render_settings", "cache", "time_dependency", "validate")
+         "render_settings", "cache", "time_dependency", "validate", "readers", "layout")
 
 
 def run(paths, mode="info", parm=None, include_all_parms=False, object_name=None,
         field_name=None, channel=None, start=None, end=None, pattern=None,
-        has_expression=False, frames=None):
+        has_expression=False, frames=None, fields=None):
     """Inspect one node or a list of nodes. Every result names its path."""
+    if fields and mode not in ("parms", "changed"):
+        raise ValueError(f"fields is read by mode 'parms' and mode 'changed', not by "
+                         f"mode '{mode}'.")
+    if pattern and mode not in ("parms", "changed", "schema", "names"):
+        raise ValueError(f"pattern is read by modes 'parms', 'changed', 'schema' and "
+                         f"'names', not by mode '{mode}'.")
     results = []
     for path in as_list(paths):
         try:
             results.append({"path": path, "result": _one(
                 path, mode, parm, include_all_parms, object_name, field_name,
-                channel, start, end, pattern, has_expression, frames)})
+                channel, start, end, pattern, has_expression, frames, fields)})
         except Exception as error:
             # A list must not lose the nodes after the one that failed.
             results.append({"path": path, "error": f"{type(error).__name__}: {error}"})
@@ -27,23 +33,24 @@ def run(paths, mode="info", parm=None, include_all_parms=False, object_name=None
 
 
 def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, start, end,
-         pattern=None, has_expression=False, frames=None):
+         pattern=None, has_expression=False, frames=None, fields=None):
     if mode == "time_dependency":
         return nodes.time_dependency(path, frames)
     if frames:
         # The same mode at each frame, with the playbar put back after.
         return timing.at_frames(frames, lambda: _one(
             path, mode, parm, include_all_parms, object_name, field_name, channel,
-            start, end, pattern, has_expression))
+            start, end, pattern, has_expression, fields=fields))
     if mode == "info":
         return nodes.get_node_info(path, include_all_parms)
     if mode == "parms":
-        return parameters.get_parameters(path, parm, pattern, has_expression)
+        return parameters.get_parameters(path, parm, pattern, has_expression,
+                                         fields=fields)
     if mode == "schema":
         return parameters.get_parameter_schema(path, parm, pattern)
     if mode == "changed":
         return parameters.get_parameters(path, parm, pattern, has_expression,
-                                         changed_only=True)
+                                         changed_only=True, fields=fields)
     if mode == "names":
         return nodes.name_parameters(path, pattern)
     if mode == "expression":
@@ -82,6 +89,11 @@ def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, 
         return cache.get_cache_status(path)
     if mode == "validate":
         return nodes.validate_names(path)
+    if mode == "layout":
+        return nodes.layout_problems(path)
+    if mode == "readers":
+        _needs(parm, "readers", "a parameter name")
+        return parameters.readers(path, parm)
     raise unknown_mode(mode, MODES)
 
 

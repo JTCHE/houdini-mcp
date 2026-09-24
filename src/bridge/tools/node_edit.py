@@ -14,7 +14,8 @@ def tool(mode: str = "create",
          material_type: str = None, material_path: str = None,
          take_name: str = None, input_path: str = None,
          code_file: str = None, replace: List[Dict[str, str]] = None,
-         paths: List[str] = None) -> str:
+         paths: List[str] = None, suffix: str = None,
+         names: Dict[str, str] = None) -> str:
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
@@ -29,7 +30,15 @@ def tool(mode: str = "create",
                              network kind: "sop" (default), "cop", "chop",
                              "lop", "material_network".
         "delete"           — path.
-        "copy"             — path, destination_path.
+        "copy"             — paths (or path), destination_path, suffix,
+                             names. Copies a set of nodes with the wires
+                             between them; a wire from outside the set goes to
+                             the same node. suffix is added to each name, or
+                             names maps a source path or name to a new name.
+                             Returns `copies`, each source path with the path
+                             of its copy: use that map, never the order of a
+                             list. Without destination_path the copies go to
+                             the right of the sources.
         "move"             — path with destination_path to put it in another
                              network, or path with position to move it on the
                              canvas.
@@ -37,10 +46,12 @@ def tool(mode: str = "create",
         "flags"            — path, display, render, bypass. The display flag
                              and the render flag are different flags.
         "color"            — path, color as [r, g, b] from 0 to 1.
-        "layout"           — path: tidy the children of that network. Give
-                             `paths` to move only those nodes. Without it the
-                             whole network moves, including the nodes the user
-                             placed by hand, and the result says so.
+        "layout"           — path: lay out the children of that network in
+                             rows, each node under its inputs. Give `paths` to
+                             place only those nodes next to what they connect
+                             to. Without it the whole network moves, including
+                             the nodes the user placed by hand, and the result
+                             says so.
         "wrangle"          — parent_path with code to make a wrangle, or path
                              with code to write into one. code_file reads the
                              code from a file, so a long snippet travels once.
@@ -73,5 +84,6 @@ def tool(mode: str = "create",
         ("material_type", material_type), ("material_path", material_path),
         ("take_name", take_name), ("input_path", input_path),
         ("code_file", code_file), ("replace", replace), ("paths", paths),
+        ("suffix", suffix), ("names", names),
     ) if value is not None})
     return call_json("node_edit", arguments)

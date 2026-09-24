@@ -14,6 +14,20 @@ MODES = ("summary", "points", "prims", "attrib", "groups", "group_members", "bbo
 
 
 def run(path, mode="summary", frames=None, **options):
+    """Read one node, or each node of a list. Every result of a list names
+    its path, and a node that fails does not stop the others."""
+    if isinstance(path, str):
+        return _read(path, mode, frames, options)
+    results = []
+    for one in path:
+        try:
+            results.append({"path": one, "result": _read(one, mode, frames, options)})
+        except Exception as error:
+            results.append({"path": one, "error": f"{type(error).__name__}: {error}"})
+    return {"count": len(results), "nodes": results}
+
+
+def _read(path, mode, frames, options):
     if frames:
         return timing.at_frames(frames, lambda: _one(path, mode, options))
     return _one(path, mode, options)
@@ -69,16 +83,17 @@ def _one(path, mode, options, frame=None):
                              '[{"node_type": "unpackusd", "parameters": {}}].')
         return geometry.try_nodes(path, want("steps"), frame)
     if mode == "volume_stats":
-        return volumes.stats(path, want("name"), frame, want("bins", 0))
+        return volumes.stats(path, want("name"), frame, want("bins", 0), want("threshold"))
     if mode == "volume_voxels":
         if not want("name"):
             raise ValueError("mode 'volume_voxels' needs name, the name of the field.")
-        return volumes.voxels(path, want("name"), frame, want("limit", 20000))
+        return volumes.voxels(path, want("name"), frame, want("limit", 20000),
+                              want("reduce"))
     if mode == "volume_sample":
         if not want("names"):
             raise ValueError("mode 'volume_sample' needs names, the fields to read.")
         return volumes.sample(path, want("names"), want("positions"), want("from_node"),
-                              frame, want("limit", 5000))
+                              frame, want("limit", 1000), want("bins", 10), want("threshold"))
     if mode == "volume_compare":
         if not want("name") or not want("against"):
             raise ValueError("mode 'volume_compare' needs name and against, two field names.")

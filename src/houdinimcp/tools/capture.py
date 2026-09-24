@@ -6,19 +6,37 @@ so the same call answers in hython and in a Houdini with a window.
 import hou
 
 from . import unknown_mode
-from ..handlers import offscreen, viewport
+from ..handlers import offscreen, sheets, viewport
 
 MUTATES = True  # a capture moves the view, and puts it back after
 
-MODES = ("viewport", "quad", "camera", "flipbook")
+MODES = ("viewport", "quad", "camera", "flipbook", "sheet", "movie")
 
 
 def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         shading=None, renderer=None, frame=None, target=None, look_from=None,
         radius=None, fill=0.9, frame_range=None, frames=None,
-        resolution=None):
+        resolution=None, azimuth=None, elevation=None, start=None, step=1,
+        count=12, columns=None, tile_width=320, background=96, reference=None,
+        color_by=None, color_range=None, fps=24, contour=None, slab=None,
+        vectors=None):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
+    if mode in ("sheet", "movie"):
+        # An OpenGL ROP draws these with or without a window, so the call is
+        # the same in both.
+        if not node:
+            raise ValueError(f"mode '{mode}' needs `node`.")
+        shared = dict(node_path=node, background=background, azimuth=azimuth,
+                      elevation=elevation, fill=fill, color_by=color_by,
+                      color_range=color_range, contour=contour, slab=slab,
+                      vectors=vectors, output=output)
+        if mode == "sheet":
+            return sheets.sheet(frames=frames, start=start, step=step, count=count,
+                                columns=columns, tile_width=tile_width,
+                                reference=reference, **shared)
+        return sheets.movie(frames=_span(frames, frame_range), fps=fps,
+                            width=(resolution or [640])[0], **shared)
     if not hou.isUIAvailable():
         # No window, so no viewport. An OpenGL ROP draws without one, and the
         # arguments mean the same thing, so the caller writes the same call.
@@ -26,7 +44,7 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
             node_path=node, output=output, frames=_span(frames, frame_range),
             resolution=resolution, camera=camera, direction=direction or "persp",
             target=target, look_from=look_from, radius=radius, fill=fill,
-            shading=shading)
+            shading=shading, azimuth=azimuth, elevation=elevation)
         return {**result, "window_state": _state()}
 
     if mode == "flipbook" and not (frames or frame_range):
@@ -37,7 +55,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         mode=mode, node=node, output=output, camera=camera,
         direction=direction, shading=shading, renderer=renderer, frame=frame,
         target=target, look_from=look_from, radius=radius, fill=fill,
-        frame_range=frame_range, frames=frames, resolution=resolution)
+        frame_range=frame_range, frames=frames, resolution=resolution,
+        azimuth=azimuth, elevation=elevation)
     return {**result, "window_state": _state()}
 
 

@@ -3,7 +3,7 @@ from ..connection import call_json
 
 
 def tool(mode: str = "get", frame: float = None, start: float = None,
-         end: float = None, action: str = "play") -> str:
+         end: float = None, action: str = None) -> str:
     """Read or set the time of the session.
 
     Use it before you read geometry that changes over time: a SOP cooks at the

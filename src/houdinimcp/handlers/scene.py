@@ -74,4 +74,5 @@ def load_scene(file_path):
 def set_frame(frame):
     """Set the current frame in Houdini's playbar."""
     hou.setFrame(frame)
-    return {"frame": frame}
+    # Read back: a frame that did not change must not pass for one that did.
+    return {"frame": hou.frame()}

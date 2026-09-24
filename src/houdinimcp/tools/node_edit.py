@@ -3,7 +3,7 @@
 Every mode takes one item or a list of items. Houdini adds a numeric suffix
 when a name is already used, so each result carries the path that Houdini gave.
 """
-from . import as_list, unknown_mode
+from . import items_of, unknown_mode
 from ..handlers import chops, cops, lop, materials, nodes, takes, vex, viewport
 
 MUTATES = True
@@ -18,10 +18,8 @@ def run(items=None, mode="create", **defaults):
     An item is a dictionary of the arguments for the mode. Arguments given
     outside `items` are defaults for every item.
     """
-    given = as_list(items) or [{}]
     results = []
-    for item in given:
-        arguments = {**defaults, **item}
+    for arguments in items_of(mode, items, defaults):
         try:
             results.append(_one(mode, arguments))
         except Exception as error:
@@ -49,7 +47,9 @@ def _one(mode, item):
     if mode == "delete":
         return nodes.delete_node(item["path"])
     if mode == "copy":
-        return nodes.copy_node(item["path"], item["destination_path"])
+        return nodes.copy_nodes(item.get("paths") or [item["path"]],
+                                item.get("destination_path"), item.get("suffix"),
+                                item.get("names"))
     if mode == "move":
         if "destination_path" in item:
             return nodes.move_node(item["path"], item["destination_path"])

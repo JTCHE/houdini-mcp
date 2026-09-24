@@ -3,10 +3,12 @@
 `hou.Volume` and `hou.VDB` do not share their method names, so a script that
 works on one fails on the other. Every function here takes both.
 
-Sampling runs in VEX through a verb, never in a Python loop: a loop over
-160,000 voxels takes seconds and holds the whole Houdini session while it runs.
+Sampling runs in compiled code through a verb, and the numbers go through
+numpy, never through a Python loop: a loop over 160,000 voxels takes seconds
+and holds the whole Houdini session while it runs.
 """
 import hou
+import numpy
 
 from . import geometry
 
@@ -84,80 +86,138 @@ def read_voxels(prim):
     return values, shape, origin
 
 
-def stats(node_path, name=None, frame=None, bins=0):
+def _array(prim):
+    """A volume as a numpy array indexed [z, y, x], with its index origin.
+
+    It raises when Houdini gives a count of voxels that fits no box, so a
+    caller never gets an empty or a wrong array with no reason.
+    """
+    values, shape, origin = read_voxels(prim)
+    if len(shape) != 3:
+        raise ValueError(f"Houdini gave {len(values)} voxels for this volume, and that count "
+                         f"fits neither its resolution {list(prim.resolution())} nor the box "
+                         f"of its active voxels, so the array has no shape. Use mode "
+                         f"'volume_sample' to read it at positions.")
+    return numpy.asarray(values, dtype=numpy.float64).reshape(shape[2], shape[1], shape[0]), \
+        shape, origin
+
+
+PERCENTILES = (1, 5, 25, 50, 75, 95, 99)
+
+
+def _summary(numbers, bins=0, threshold=None):
+    """The numbers that describe a set of values: extremes, mean, percentiles,
+    and on request a histogram and the count on each side of a threshold."""
+    numbers = numpy.asarray(numbers, dtype=numpy.float64).ravel()
+    if not numbers.size:
+        return {"count": 0}
+    report = {"count": int(numbers.size), "min": float(numbers.min()),
+              "max": float(numbers.max()), "mean": float(numbers.mean()),
+              "percentiles": {str(share): float(value) for share, value in
+                              zip(PERCENTILES, numpy.percentile(numbers, PERCENTILES))},
+              "share_above_zero": round(float((numbers > 0).mean()), 4)}
+    if bins:
+        counts, edges = numpy.histogram(numbers, bins=int(bins))
+        report["histogram"] = [{"from": float(edges[index]), "to": float(edges[index + 1]),
+                                "count": int(count)} for index, count in enumerate(counts)]
+    if threshold is not None:
+        below = int((numbers < threshold).sum())
+        report["threshold"] = {"value": threshold, "below": below,
+                               "at_or_above": int(numbers.size) - below,
+                               "share_below": round(below / numbers.size, 4)}
+    return report
+
+
+def stats(node_path, name=None, frame=None, bins=0, threshold=None):
     """The numbers that say what a volume holds, without a picture.
 
-    Mean, the extremes, the share of voxels over a threshold and the detail
-    (the mean gradient over the mean value) answer most questions about a
-    simulation, and they cost one call.
+    Mean, the extremes, the percentiles and the share of voxels over a
+    threshold answer most questions about a simulation, and they cost one call.
     """
     node, geo = geometry.resolve(node_path, frame)
     found = []
     for prim in _named(geo, name):
         report = describe(prim, geo)
         values, shape, _origin = read_voxels(prim)
-        numbers = sorted(values)
-        count = len(numbers)
-        if count:
-            report["voxel_count"] = count
-            report["shape"] = shape
-            report["percentiles"] = {
-                str(share): numbers[min(count - 1, int(count * share / 100))]
-                for share in (1, 25, 50, 75, 99)
-            }
-            above_zero = sum(1 for value in numbers if value > 0)
-            report["share_above_zero"] = round(above_zero / count, 4)
-        if bins:
-            report["histogram"] = _histogram(numbers, bins)
+        report["shape"] = shape
+        report.update(_summary(values, bins, threshold))
         found.append(report)
     return {"path": node_path, "count": len(found), "volumes": found}
 
 
-def _histogram(sorted_values, bins):
-    """How many voxels fall in each band between the lowest and the highest."""
-    if not sorted_values:
-        return []
-    low, high = sorted_values[0], sorted_values[-1]
-    width = (high - low) / bins or 1.0
-    counts = [0] * bins
-    for value in sorted_values:
-        index = min(bins - 1, int((value - low) / width))
-        counts[index] += 1
-    return [{"from": low + width * index, "to": low + width * (index + 1),
-             "voxels": counts[index]} for index in range(bins)]
+AXES = {"x": 2, "y": 1, "z": 0}
+REDUCTIONS = ("sum", "mean", "max", "min", "project_x", "project_y", "project_z")
 
 
-def voxels(node_path, name, frame=None, limit=20000):
-    """One volume as a flat array of numbers, with its shape and its transform.
+def voxels(node_path, name, frame=None, limit=20000, reduce=None):
+    """One volume as an array of numbers indexed [z][y][x], with its shape and
+    its transform, or one reduction of it.
 
-    The array is what a caller needs to measure a field itself. It is cut at
-    `limit` numbers, because a full simulation grid is far more than a client
-    can hold; the shape says how many there really are.
+    A 200 by 200 by 160 field is 25 MB of numbers, and most questions need one
+    number or one picture of it. `reduce` gives "sum", "mean", "max" or "min"
+    of every voxel, or "project_x", "project_y" or "project_z": the sum along
+    that axis, a 2D array. An array longer than `limit` numbers is thinned by
+    a step that the answer names.
     """
     node, geo = geometry.resolve(node_path, frame)
     prim = _named(geo, name)[0]
-    values, shape, origin = read_voxels(prim)
-    report = {**describe(prim, geo), "shape": shape, "index_origin": origin,
-              "voxel_count": len(values),
-              "transform": [list(row) for row in prim.transform().asTuple()]
-              if hasattr(prim.transform(), "asTuple") else str(prim.transform())}
-    report["values"] = list(values[:limit])
-    if len(values) > limit:
-        report["note"] = (f"{len(values)} voxels, and the first {limit} are here. Use mode "
-                          f"'volume_stats' for the numbers, or 'volume_sample' for the "
-                          f"values at the places that matter.")
+    array, shape, origin = _array(prim)
+    report = {**describe(prim, geo), "shape_xyz": shape, "index_origin": origin,
+              "voxel_count": int(array.size),
+              "transform": [list(row) for row in prim.transform().asTupleOfTuples()]}
+    if reduce in ("sum", "mean", "max", "min"):
+        report["reduce"] = reduce
+        report["value"] = float(getattr(array, reduce)())
+        return report
+    if reduce:
+        if reduce not in REDUCTIONS:
+            raise ValueError(f"Unknown reduce '{reduce}'. Use {', '.join(REDUCTIONS)}.")
+        array = array.sum(axis=AXES[reduce[-1]])
+        report["reduce"] = reduce
+    step = 1
+    while array[tuple(slice(None, None, step) for _ in array.shape)].size > limit:
+        step += 1
+    if step > 1:
+        array = array[tuple(slice(None, None, step) for _ in array.shape)]
+        report["step"] = step
+        report["note"] = (f"Every {step}th voxel on each axis, to stay under {limit} numbers. "
+                          f"Raise `limit`, or use a reduction.")
+    report["array_shape"] = list(array.shape)
+    report["values"] = numpy.round(array, 6).tolist()
     return report
 
 
-def sample(node_path, names, positions=None, from_node=None, frame=None, limit=5000):
-    """Read named volumes at a list of world positions.
+def _points(places):
+    """A geometry with one point at each position."""
+    points = hou.Geometry()
+    points.createPoints([hou.Vector3(place) for place in places])
+    return points
 
-    `positions` is a list of [x, y, z]. `from_node` takes the points of another
-    node as the positions instead, so "what does the collision field read where
-    there is smoke" is one call.
 
-    `limit` holds the number of positions down. Each read is one call into
-    Houdini, and a read of a whole grid would hold the session for seconds.
+def _read_at(geo, names, points):
+    """The value of each named field at each point of `points`, as arrays.
+
+    The Attribute from Volume verb samples in compiled code, so a read of a
+    million points costs about what a read of a hundred costs in Python.
+    """
+    verb = hou.sopNodeTypeCategory().nodeVerb("attribfromvolume")
+    found = {}
+    for name in names:
+        verb.setParms({"field": name, "name": "mcp_sample", "type": 0, "size": 1})
+        result = hou.Geometry()
+        verb.execute(result, [points, geo])
+        found[name] = numpy.asarray(result.pointFloatAttribValues("mcp_sample"))
+    return found
+
+
+def sample(node_path, names, positions=None, from_node=None, frame=None, limit=1000,
+           bins=10, threshold=None):
+    """Read named volumes at a list of world positions, or at the points of
+    another node, and describe what they read.
+
+    `from_node` answers "what does the collision field read where there is
+    smoke" in one call, with no node added to the scene. The values come back
+    when there are at most `limit` of them; the summary always does.
     """
     node, geo = geometry.resolve(node_path, frame)
     names = [names] if isinstance(names, str) else list(names)
@@ -166,36 +226,24 @@ def sample(node_path, names, positions=None, from_node=None, frame=None, limit=5
     if missing:
         raise ValueError(f"No volume named {', '.join(missing)}. This geometry has: "
                          f"{', '.join(have) or 'no volumes'}.")
-
     if from_node:
-        _other, other_geo = geometry.resolve(from_node, frame)
-        places = [list(point.position()) for point in other_geo.points()[:limit]]
+        _other, points = geometry.resolve(from_node, frame)
     elif positions:
-        places = [list(position) for position in positions]
+        points = _points(positions)
     else:
         raise ValueError("Give positions, a list of [x, y, z], or from_node, a node whose "
                          "points are the positions.")
-    cut = len(places) > limit
-    places = places[:limit]
-    values = _read_at(geo, names, places)
-
-    report = {"path": node_path, "positions": len(places), "values": values}
-    report["summary"] = {
-        name: ({"min": min(numbers), "max": max(numbers),
-                "mean": sum(numbers) / len(numbers)} if numbers else None)
-        for name, numbers in values.items()
-    }
-    if cut:
-        report["note"] = (f"Only the first {limit} positions were read. Raise `limit` if "
-                          f"you need more, and know that each read holds the session.")
+    read = _read_at(geo, names, points)
+    count = len(points.iterPoints())
+    report = {"path": node_path, "positions": count,
+              "summary": {name: _summary(values, bins, threshold)
+                          for name, values in read.items()}}
+    if count <= limit:
+        report["values"] = {name: values.tolist() for name, values in read.items()}
+    else:
+        report["note"] = (f"{count} positions: the summary is here, the values are not. "
+                          f"Raise `limit` to get them.")
     return report
-
-
-def _read_at(geo, names, places):
-    """The value of each named field at each position."""
-    fields = {name: _named(geo, name)[0] for name in names}
-    return {name: [float(prim.sample(hou.Vector3(place))) for place in places]
-            for name, prim in fields.items()}
 
 
 def _grid_places(prim, most=30000):
@@ -232,25 +280,17 @@ def compare_fields(node_path, name, against, frame=None, bands=10):
     # Sample both fields on a grid in world space, over the box of the first
     # one. World space needs no voxel index, so a Volume and a VDB, which do
     # not agree on the index of a voxel, both work the same way.
-    places = _grid_places(field)
-    read = _read_at(geo, [name, against], places)
+    read = _read_at(geo, [name, against], _points(_grid_places(field)))
     here, there = read[name], read[against]
-    if not here:
+    if not here.size:
         return {"path": node_path, "field": name, "against": against, "samples": 0}
-
-    low, high = min(there), max(there)
-    width = (high - low) / bands or 1.0
-    totals = [0.0] * bands
-    counts = [0] * bands
-    for value, band_value in zip(here, there):
-        index = min(bands - 1, int((band_value - low) / width))
-        totals[index] += value
-        counts[index] += 1
+    counts, edges = numpy.histogram(there, bins=bands)
+    totals, _edges = numpy.histogram(there, bins=edges, weights=here)
     return {
         "path": node_path, "field": name, "against": against,
-        "samples": len(here),
-        "total_of_field": sum(here),
-        "bands": [{"from": low + width * index, "to": low + width * (index + 1),
-                   "samples": counts[index], "total": totals[index]}
+        "samples": int(here.size),
+        "total_of_field": float(here.sum()),
+        "bands": [{"from": float(edges[index]), "to": float(edges[index + 1]),
+                   "samples": int(counts[index]), "total": float(totals[index])}
                   for index in range(bands)],
     }

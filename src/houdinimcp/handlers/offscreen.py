@@ -1,17 +1,25 @@
-"""A picture of the scene from a Houdini with no window.
+"""Pictures drawn by an OpenGL ROP, with or without a window.
 
 hython has no viewport, and that is where most agent work happens. An OpenGL
-ROP draws without one, so the same capture call answers in both kinds of
-session: this builds a camera and a ROP, renders, and removes them again.
+ROP draws without one. hython 22.0 stops with a segmentation fault on the
+second OpenGL ROP render in one process, so the ROP never runs in the session:
+the session writes the geometry of each frame to disk, and a new hython
+(gl_child.py) draws all the frames in one render. The scene of the user gets
+no camera and no ROP from this.
 """
+import json
+import math
 import os
+import subprocess
 
 import hou
 
 from . import timing, viewport
 
-ROP_NAME = "mcp_offscreen"
-CAMERA_NAME = "mcp_offscreen_cam"
+# The lens of a new Houdini camera: the one gl_child draws with.
+FOCAL, APERTURE = 50.0, 41.4214
+SHADING = {"smooth": "smooth", "smooth_wire": "smoothwire", "flat": "flat",
+           "wireframe": "wire"}
 
 # Where the camera sits, as a direction from the middle of what it looks at.
 DIRECTIONS = {
@@ -28,143 +36,213 @@ DIRECTIONS = {
 def _box(node):
     """The box of what a node cooked, or of everything that is displayed."""
     if node is not None:
-        geometry = node.geometry() if hasattr(node, "geometry") else None
-        if geometry is not None:
-            return geometry.boundingBox()
+        return _geometry(node).boundingBox()
     box = hou.BoundingBox()
-    for child in hou.node("/obj").children():
-        try:
-            if child.isObjectDisplayed() and hasattr(child, "geometry"):
-                box.enlargeToContain(child.boundingBox())
-        except (AttributeError, hou.OperationFailed):
-            continue
+    for child in _displayed():
+        box.enlargeToContain(_placed(child).boundingBox())
     return box
 
 
-def _aim(camera, box, direction="persp", target=None, look_from=None,
-         radius=None, fill=0.9):
-    """Put the camera where it sees the box, with room around it."""
+def _displayed():
+    """The SOP that each displayed geometry object of /obj shows. A camera or
+    a light has a display SOP too: its guide."""
+    return [child.displayNode() for child in hou.node("/obj").children()
+            if child.type().name() == "geo" and child.isObjectDisplayed()
+            and child.displayNode() is not None]
+
+
+def _geometry(node):
+    geometry = node.geometry() if hasattr(node, "geometry") else None
+    if geometry is None:
+        errors = "; ".join(node.errors()) if hasattr(node, "errors") else ""
+        raise ValueError(f"{node.path()} has no geometry to draw"
+                         + (f": {errors}" if errors else ". The OpenGL ROP draws SOP "
+                            "geometry; give a SOP."))
+    return geometry
+
+
+def _placed(node):
+    """The geometry of a SOP where its object puts it in the world."""
+    geometry = hou.Geometry()
+    geometry.merge(_geometry(node))
+    owner = node
+    while owner is not None and not isinstance(owner, hou.ObjNode):
+        owner = owner.parent()
+    if owner is not None:
+        geometry.transform(owner.worldTransform())
+    return geometry
+
+
+def _orbit_direction(azimuth, elevation):
+    """The direction from the target to the eye for an orbit angle in degrees.
+    0 and 0 look along -Z, from the front, as in the viewport."""
+    turn, lift = math.radians(azimuth or 0.0), math.radians(elevation or 0.0)
+    return (math.sin(turn) * math.cos(lift), math.sin(lift),
+            math.cos(turn) * math.cos(lift))
+
+
+def _aim(box, direction="persp", target=None, look_from=None, radius=None, fill=0.9,
+         aspect=0.75):
+    """A view that sees the box, with room around it. `direction` is a name,
+    or a direction vector from the target to the eye. `aspect` is the height
+    of the picture over its width."""
     middle = hou.Vector3(target) if target is not None else box.center()
     if look_from is not None:
         where = hou.Vector3(look_from)
     else:
         size = box.sizevec().length() or 1.0
-        # The aperture and the focal length of the camera say how wide it sees.
-        half = camera.evalParm("aperture") / (2.0 * camera.evalParm("focal"))
+        # The aperture is the width. A wide picture sees less in height.
+        half = APERTURE / (2.0 * FOCAL) * min(1.0, float(aspect))
         away = radius if radius is not None else (size * 0.5) / (half * float(fill or 1.0))
-        offset = hou.Vector3(DIRECTIONS.get(direction, DIRECTIONS["persp"])).normalized()
+        offset = hou.Vector3(direction if isinstance(direction, tuple)
+                             else DIRECTIONS.get(direction, DIRECTIONS["persp"])).normalized()
         where = middle + offset * away
-    camera.parmTuple("t").set(tuple(where))
     look = hou.hmath.buildRotateLookAt(where, middle, hou.Vector3(0, 1, 0))
-    camera.parmTuple("r").set(tuple(look.extractRotates()))
-    return {"look_from": list(where), "target": list(middle)}
+    view = _view(where, look.extractRotates(), FOCAL, APERTURE, "perspective", 1.0)
+    return view, {"look_from": list(where), "target": list(middle)}
+
+
+def _view(translate, rotate, focal, aperture, projection, orthowidth):
+    return {"tx": translate[0], "ty": translate[1], "tz": translate[2],
+            "rx": rotate[0], "ry": rotate[1], "rz": rotate[2], "focal": focal,
+            "aperture": aperture, "projection": projection, "orthowidth": orthowidth}
+
+
+def _camera_view(camera):
+    """The view through a camera node of the scene at the current frame."""
+    parts = camera.worldTransform().explode()
+    return _view(parts["translate"], parts["rotate"], camera.evalParm("focal"),
+                 camera.evalParm("aperture"), camera.parm("projection").evalAsString(),
+                 camera.evalParm("orthowidth"))
+
+
+def draw(sources, view, frames, size, shading=None, color_by=None, color_range=None,
+         contour=None, slab=None, vectors=None):
+    """Draw SOP nodes at each frame, and return one PNG with alpha per frame.
+
+    `view` is a view from _aim, or a camera node read at each frame. `slab`
+    is [axis, thickness]: only the points in that cut through the middle.
+    `contour` is a step: colour by the fraction of the value over it.
+    `vectors` is a scale: a line along the vector `color_by` from the points.
+    """
+    if (contour or vectors) and not color_by:
+        raise ValueError("contour and vectors read the attribute that color_by names.")
+    if slab is not None and (len(slab) != 2 or str(slab[0]) not in ("x", "y", "z")
+                             or float(slab[1]) <= 0):
+        raise ValueError(f"slab is [axis, thickness], for example ['z', 0.1], not {slab}.")
+    if shading is not None and shading not in SHADING:
+        raise ValueError(f"Unknown shading: {shading}. Use: {list(SHADING)}")
+    if not sources:
+        raise ValueError("Nothing is displayed in /obj, so there is nothing to draw.")
+    color_size = None
+    if color_by:
+        for node in sources:
+            attrib = _geometry(node).findPointAttrib(color_by)
+            if attrib is None or attrib.dataType() != hou.attribData.Float \
+                    or attrib.size() > 4:
+                names = [attrib.name() for attrib in _geometry(node).pointAttribs()]
+                raise ValueError(f"{node.path()} has no float point attribute "
+                                 f"'{color_by}' of 1 to 4 values. Point attributes: {names}")
+            color_size = attrib.size()
+            if vectors and color_size != 3:
+                raise ValueError(f"vectors needs a vector attribute, and '{color_by}' has "
+                                 f"{color_size} values.")
+    folder = viewport.new_file("mcp_draw", "")
+    os.makedirs(folder)
+    views = []
+    with timing.keep_frame():
+        for index, frame in enumerate(frames, 1):
+            hou.setFrame(frame)
+            for number, node in enumerate(sources):
+                _placed(node).saveToFile(os.path.join(folder, f"s{number}.{index}.bgeo.sc"))
+            views.append(_camera_view(view) if isinstance(view, hou.ObjNode) else view)
+    picture = os.path.join(folder, "draw.$F4.png").replace("\\", "/")
+    job = {"sources": [os.path.join(folder, f"s{number}.$F.bgeo.sc").replace("\\", "/")
+                       for number in range(len(sources))],
+           "views": views, "count": len(frames), "size": [int(size[0]), int(size[1])],
+           "shading": SHADING[shading or "smooth"], "picture": picture,
+           "color_by": color_by, "color_size": color_size, "color_range": color_range,
+           "contour": contour, "slab": slab, "vectors": vectors}
+    with open(os.path.join(folder, "job.json"), "w") as handle:
+        json.dump(job, handle)
+    hython = os.path.join(hou.getenv("HFS"), "bin", "hython.exe" if os.name == "nt" else "hython")
+    result = subprocess.run([hython, os.path.join(os.path.dirname(__file__), "gl_child.py"),
+                             os.path.join(folder, "job.json")],
+                            capture_output=True, text=True, timeout=600)
+    written = [hou.text.expandStringAtFrame(picture, index)
+               for index in range(1, len(frames) + 1)]
+    missing = [path for path in written if not os.path.isfile(path)]
+    if result.returncode != 0 or missing:
+        raise RuntimeError(f"The OpenGL ROP drew {len(written) - len(missing)} of "
+                           f"{len(written)} frames. hython said: "
+                           f"{(result.stderr or result.stdout).strip()[-800:]}")
+    if all(_empty(path) for path in written):
+        raise RuntimeError(f"The OpenGL ROP drew nothing at any of the {len(written)} frames. "
+                           f"The geometry is outside the view, or it is empty.")
+    return written
+
+
+def _empty(path):
+    """True when no pixel of the picture is drawn: its alpha is zero."""
+    from PIL import Image
+    return Image.open(path).convert("RGBA").getchannel("A").getbbox() is None
+
+
+def over_grey(path, background=96):
+    """A frame over a flat grey, as an RGB image. The ROP writes straight
+    alpha, and a mid grey shows the density of smoke best."""
+    from PIL import Image
+    frame = Image.open(path).convert("RGBA")
+    ground = Image.new("RGBA", frame.size, (background, background, background, 255))
+    return Image.alpha_composite(ground, frame).convert("RGB")
 
 
 def capture(node_path=None, output=None, frames=None, resolution=None,
             camera=None, direction="persp", target=None, look_from=None,
-            radius=None, fill=0.9, shading=None):
-    """Draw a node, or the whole scene, at one frame or at several.
+            radius=None, fill=0.9, shading=None, azimuth=None, elevation=None):
+    """Draw a node, or everything displayed in /obj, at one frame or at several.
 
-    The camera and the ROP live only for this call. Give `camera` to look
-    through a camera of the scene instead.
+    Give `camera` to look through a camera of the scene.
     """
     node = None
     if node_path:
         node = hou.node(node_path)
         if not node:
             raise ValueError(f"Node not found: {node_path}")
-        node.cook(force=False)
 
     wanted = timing.frame_list(frames, default=[hou.frame()])
-    if not output:
-        output = viewport.new_file("mcp_offscreen",
-                                   ".$F4.jpg" if len(wanted) > 1 else ".jpg")
-    output = os.path.abspath(output)
-    folder = os.path.dirname(output)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-
+    size = [int(value) for value in resolution or (1280, 720)]
+    if len(size) == 1:
+        size.append(size[0] * 9 // 16)
+    aimed = None
     if camera:
-        eye = hou.node(camera)
-        if not eye:
+        view = hou.node(camera)
+        if not isinstance(view, hou.ObjNode) or view.parm("focal") is None:
             raise ValueError(f"Camera not found: {camera}")
-        aimed = None
     else:
-        eye = _kept_node("/obj", "cam", CAMERA_NAME)
-        aimed = _aim(eye, _box(node), direction, target, look_from, radius, fill)
+        if azimuth is not None or elevation is not None:
+            direction = _orbit_direction(azimuth, elevation)
+        view, aimed = _aim(_box(node), direction, target, look_from, radius, fill,
+                           size[1] / size[0])
 
-    rop = _kept_node("/out", "opengl", ROP_NAME)
-    rop.parm("camera").set(eye.path())
-    rop.parm("picture").set(output)
-    rop.parm("tres").set(bool(resolution))
-    if resolution:
-        rop.parmTuple("res").set((int(resolution[0]), int(resolution[1])))
-    # scenepath stays /obj: it names the network to render, and a geometry
-    # object is not one. vobjects says which objects of it to draw.
-    obj = _object_of(node) if node is not None else None
-    rop.parm("vobjects").set(obj.name() if obj else "*")
-    _shade(rop, shading)
-
+    drawn = draw([node] if node is not None else _displayed(), view, wanted, size, shading)
+    if not output:
+        output = viewport.new_file("mcp_offscreen", ".$F4.png" if len(wanted) > 1 else ".png")
+    output = os.path.abspath(output)
+    os.makedirs(os.path.dirname(output), exist_ok=True)
     written = []
-    # The ROP draws what the object displays, so the node to look at must hold
-    # the display flag while it draws, and get it back after.
-    with viewport.kept_display(node_path if node is not None else None):
-        for frame in wanted:
-            rop.render(frame_range=(frame, frame, 1), verbose=False)
-            written.append(_written(output, frame))
+    for frame, path in zip(wanted, drawn):
+        target_file = hou.text.expandStringAtFrame(output, frame) \
+            if len(wanted) == 1 or "$F" in output else viewport._numbered(output, f"{frame:g}")
+        over_grey(path).save(target_file)
+        written.append(target_file)
 
     report = {"filepath": written[0], "frames": wanted, "offscreen": True,
-              "note": f"This Houdini has no window, so an OpenGL ROP drew the "
-                      f"picture. {rop.path()} and {eye.path()} stay in the "
-                      f"scene and every capture reuses them."}
+              "note": "An OpenGL ROP in a new hython drew the picture over a grey "
+                      "background. The scene is not changed."}
     if len(written) > 1:
         report["images"] = [{"frame": frame, "filepath": path}
                             for frame, path in zip(wanted, written)]
     if aimed:
         report.update(aimed)
     return report
-
-
-def _kept_node(where, kind, name):
-    """The node this tool works with, made once and reused after that.
-
-    It is never destroyed, and that is not carelessness: hython hangs for good
-    when an OpenGL ROP is destroyed after it has rendered. Two nodes with a
-    plain name cost nothing, and the second capture is faster for it.
-    """
-    parent = hou.node(where)
-    node = parent.node(name)
-    if node and node.type().name() != kind:
-        raise ValueError(f"{node.path()} is a {node.type().name()}, and this tool "
-                         f"needs a {kind} there. Rename it or remove it.")
-    return node or parent.createNode(kind, name)
-
-
-def _object_of(node):
-    """The object that holds a node. An OpenGL ROP chooses what to draw by
-    object, so a SOP deep in a chain answers with the geometry above it."""
-    while node is not None and node.parent() is not None:
-        if node.parent().path() == "/obj":
-            return node
-        node = node.parent()
-    return None
-
-
-def _shade(rop, shading):
-    """The shading of an OpenGL ROP, named the way the viewport names it."""
-    modes = {"smooth": "smooth", "smooth_wire": "smoothwire", "flat": "flat",
-             "wireframe": "wire"}
-    parm = rop.parm("shademode")
-    if not parm:
-        return
-    if shading is None:
-        parm.set(modes["smooth"])
-        return
-    if shading not in modes:
-        raise ValueError(f"Unknown shading: {shading}. Use: {list(modes)}")
-    parm.set(modes[shading])
-
-
-def _written(output, frame):
-    """The file the ROP wrote for one frame, with $F replaced by the number."""
-    return hou.text.expandStringAtFrame(output, frame)

@@ -38,11 +38,13 @@ The tools
 Houdini fails without an error more often than it fails with one. These facts
 cause most wrong results.
 
-1. A parameter write has no effect when the parameter carries an expression or
-   a keyframe. Use parm_set, which says so; a script does not.
+1. A parameter write can report success and change nothing: the parameter
+   carries an expression or a keyframe, another parameter disables or hides
+   it, or a strict range clamps the value. parm_set says so, and execute lists
+   such writes in `write_warnings`. Read them.
 2. A parameter that reads another node through a channel reference writes to
-   that other node. parm_set refuses such a write until you ask for it with
-   follow_reference.
+   that other node, also through `hou.Parm.set` in execute. parm_set refuses
+   such a write until you ask for it with follow_reference.
 3. A node name gets a numeric suffix when the name is already used. Keep the
    path that the create call returned. Do not look the node up by the name you
    asked for.
@@ -58,8 +60,10 @@ cause most wrong results.
 
 Rules of the house
 
-- Do not lay out the user's network. node_edit lays out the nodes you made; a
-  layout of a whole network moves work the user placed by hand.
+- Do not lay out the user's network, and never call `layoutChildren` in
+  execute. node_edit and connect place each node you make under its inputs;
+  a layout of a whole network moves work the user placed by hand. Read
+  node_inspect mode "layout" on the network after you add nodes.
 - The VEX you write stays in the scene, and the user reads it and tunes it by
   hand. Write it for that reader.
   - Name things with plain words in camelCase: `outwardSpeed`, `distanceToShell`.
@@ -84,9 +88,8 @@ async def lifespan(server):
 
 
 def build() -> MCPServer:
-    server = MCPServer("HoudiniMCP", instructions=INSTRUCTIONS, lifespan=lifespan)
-    tools.register(server)
-    return server
+    return MCPServer("HoudiniMCP", instructions=INSTRUCTIONS, lifespan=lifespan,
+                     tools=tools.build())
 
 
 def main():
