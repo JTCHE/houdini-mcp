@@ -1,6 +1,6 @@
 [project]
 name = "houdini-mcp-server"
-version = "0.4.2"
+version = "0.5.0"
 description = "Connect AI Agents to SideFX Houdini, with full documentation and screenshot support."
 readme = "README.md"
 requires-python = ">=3.10"
