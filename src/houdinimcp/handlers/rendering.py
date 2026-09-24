@@ -55,11 +55,26 @@ def create_render_node(render_type="opengl", name=None, parent_path="/out"):
     return {"path": node.path(), "name": node.name(), "type": render_type}
 
 
+_gl_rendered = False
+
+
 def start_render(path, frame_range=None):
     """Start a render from a ROP node."""
+    global _gl_rendered
     node = hou.node(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
+    if node.type().name() == "opengl" and not hou.isUIAvailable() \
+            and hou.applicationVersion()[0] >= 22:
+        # hython 22.0 stops with a segmentation fault on the second OpenGL ROP
+        # render in one process, and the unsaved scene is lost.
+        if _gl_rendered:
+            raise RuntimeError(
+                "This hython already rendered an OpenGL ROP once. hython 22.0 stops "
+                "with a segmentation fault on the second one, and the scene is lost. "
+                "Render the whole range in one call, or use capture (it draws in a "
+                "new hython).")
+        _gl_rendered = True
     if frame_range and len(frame_range) == 2:
         node.render(frame_range=(frame_range[0], frame_range[1]))
     else:

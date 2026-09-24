@@ -20,7 +20,10 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          frame_range: List[float] = None,
          frames: Union[float, List[float], Dict[str, float]] = None,
          resolution: List[int] = None, azimuth: float = None,
-         elevation: float = None) -> list[Image | str]:
+         elevation: float = None, start: float = None, step: float = 1,
+         count: int = 12, columns: int = None, tile_width: int = 320,
+         background: int = 96, reference: str = None, color_by: str = None,
+         color_range: List[float] = None, fps: float = 24) -> list[Image | str]:
     """Make a picture of the scene and look at it.
 
     Use it to confirm your own work: numbers in a node do not tell you that the
@@ -37,10 +40,26 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         "camera"   — through the camera node at `camera`.
         "flipbook" — a sequence over `frame_range` [start, end]. Returns the
                      path of the files, not a picture.
+        "sheet"    — `node` at many frames on one picture, a tile for each
+                     frame with its number, all from one camera that does not
+                     move. Frames: `frames`, or `count` frames from `start`
+                     (the current frame) at `step` (1). A step over 2 hides
+                     movement and gives a warning: look at a short range at
+                     step 1. `reference` is a picture to put first, to
+                     compare. `columns`, `tile_width` set the grid.
+        "movie"    — `node` over `frames` or `frame_range` (the playbar
+                     range) as an MP4 at `fps`, `resolution` [width] wide.
+                     Returns the path; open it in a player.
+        Both draw with an OpenGL ROP, with or without a window, over a flat
+        grey `background` (0-255, 96 by default: smoke reads best on mid
+        grey). `color_by` colours the points by an attribute, blue at the low
+        end of `color_range` [low, high] and red at the high end; a vector
+        attribute uses its length.
 
     A Houdini with no window has no viewport, and there an OpenGL ROP draws the
-    same picture from the same arguments, with a camera and a ROP that the
-    tool keeps for its next call.
+    same picture from the same arguments over a grey background. It runs in a
+    new hython, so the scene gets no camera and no ROP.
+
 
     There is no picture of the network editor: every Houdini pane is a native
     GL drawable, and Qt draws nothing into it. Read the graph with node_inspect.
@@ -94,11 +113,16 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                               "look_from": look_from, "radius": radius,
                               "fill": fill, "frame_range": frame_range,
                               "frames": frames, "resolution": resolution,
-                              "azimuth": azimuth, "elevation": elevation},
+                              "azimuth": azimuth, "elevation": elevation,
+                              "start": start, "step": step, "count": count,
+                              "columns": columns, "tile_width": tile_width,
+                              "background": background, "reference": reference,
+                              "color_by": color_by, "color_range": color_range,
+                              "fps": fps},
                   timeout=300.0)
 
     contents = []
-    if mode != "flipbook":
+    if mode not in ("flipbook", "movie"):
         for path in _paths(result):
             contents.append(_picture(path, result))
     return [item for item in contents if item is not None] + \

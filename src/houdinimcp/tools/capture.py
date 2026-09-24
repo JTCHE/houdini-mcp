@@ -6,19 +6,35 @@ so the same call answers in hython and in a Houdini with a window.
 import hou
 
 from . import unknown_mode
-from ..handlers import offscreen, viewport
+from ..handlers import offscreen, sheets, viewport
 
 MUTATES = True  # a capture moves the view, and puts it back after
 
-MODES = ("viewport", "quad", "camera", "flipbook")
+MODES = ("viewport", "quad", "camera", "flipbook", "sheet", "movie")
 
 
 def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         shading=None, renderer=None, frame=None, target=None, look_from=None,
         radius=None, fill=0.9, frame_range=None, frames=None,
-        resolution=None, azimuth=None, elevation=None):
+        resolution=None, azimuth=None, elevation=None, start=None, step=1,
+        count=12, columns=None, tile_width=320, background=96, reference=None,
+        color_by=None, color_range=None, fps=24):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
+    if mode in ("sheet", "movie"):
+        # An OpenGL ROP draws these with or without a window, so the call is
+        # the same in both.
+        if not node:
+            raise ValueError(f"mode '{mode}' needs `node`.")
+        shared = dict(node_path=node, background=background, azimuth=azimuth,
+                      elevation=elevation, fill=fill, color_by=color_by,
+                      color_range=color_range, output=output)
+        if mode == "sheet":
+            return sheets.sheet(frames=frames, start=start, step=step, count=count,
+                                columns=columns, tile_width=tile_width,
+                                reference=reference, **shared)
+        return sheets.movie(frames=_span(frames, frame_range), fps=fps,
+                            width=(resolution or [640])[0], **shared)
     if not hou.isUIAvailable():
         # No window, so no viewport. An OpenGL ROP draws without one, and the
         # arguments mean the same thing, so the caller writes the same call.
