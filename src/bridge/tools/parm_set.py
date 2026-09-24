@@ -7,7 +7,8 @@ from ..connection import call_json
 def tool(mode: str = "value",
          items: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
          path: str = None, parm: str = None, value: Any = None,
-         parameters: Dict[str, Any] = None, expression: str = None,
+         parameters: Union[Dict[str, Any], List[Dict[str, Any]]] = None,
+         expression: str = None,
          language: str = "hscript", frame: float = None,
          keyframes: List[Dict[str, Any]] = None, locked: bool = None,
          src_path: str = None, src_parm: str = None, name: str = None,
@@ -53,9 +54,19 @@ def tool(mode: str = "value",
         "lock"            — path, parm, locked.
         "link"            — src_path, src_parm, path, parm: the parameter at
                             path follows the one at src_path.
-        "spare"           — path, name, label, parm_type ("float", "int",
-                            "string", "toggle"), default. Or path and
-                            parameters, a list of those dictionaries.
+        "spare"           — path, parameters: a list of controls to add, each
+                            {name, label, type, default, min, max, strict,
+                            help, value, expression, items}. type is "float",
+                            "int", "vector", "toggle", "string", "menu" (with
+                            items), "ramp" or "color_ramp" (default: a list of
+                            [position, value]). One control can also come as
+                            name, label, parm_type, default, expression.
+                            On a wrangle it first does what the Create
+                            Parameters button does, a parameter for each ch()
+                            call, and puts every control in that folder above
+                            the code. Use it instead of numbers typed into VEX:
+                            the user tunes these. A control that exists is
+                            replaced in place, so a second call is safe.
         "render_settings" — path, settings for a ROP node.
         "chop_export"     — chop_path, channel_name, path, parm.
         "snapshot"        — name, paths: save every parameter of these nodes,
