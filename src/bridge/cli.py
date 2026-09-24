@@ -60,8 +60,10 @@ cause most wrong results.
 
 Rules of the house
 
-- Do not lay out the user's network. node_edit lays out the nodes you made; a
-  layout of a whole network moves work the user placed by hand.
+- Do not lay out the user's network, and never call `layoutChildren` in
+  execute. node_edit and connect place each node you make under its inputs;
+  a layout of a whole network moves work the user placed by hand. Read
+  node_inspect mode "layout" on the network after you add nodes.
 - The VEX you write stays in the scene, and the user reads it and tunes it by
   hand. Write it for that reader.
   - Name things with plain words in camelCase: `outwardSpeed`, `distanceToShell`.

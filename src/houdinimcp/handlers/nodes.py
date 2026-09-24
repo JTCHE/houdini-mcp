@@ -2,6 +2,8 @@
 import re
 
 import hou
+
+from . import layout
 from .parameters import inert, matches
 
 
@@ -32,7 +34,7 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
     if position and len(position) >= 2:
         node.setPosition([position[0], position[1]])
     else:
-        place_node(node)
+        report.update(place_node(node))
     report["position"] = list(node.position())
     if parameters:
         # The same write path as parm_set, so a write that does nothing is
@@ -286,6 +288,18 @@ def set_node_flags(node_path, display=None, render=None, bypass=None):
     return {"path": node.path(), "changes": changes}
 
 
+def layout_problems(path):
+    """The layout faults of a network: a node above its input, and two nodes
+    in one slot, where one name covers the other. A position alone does not
+    show that; this is what a picture of the network editor would show."""
+    network = hou.node(path)
+    if not network:
+        raise ValueError(f"Node not found: {path}")
+    faults = layout.problems(network)
+    return {"path": path, "nodes": len(network.children()), "count": len(faults),
+            "problems": faults}
+
+
 def layout_children(node_path="/obj", paths=None):
     """Tidy the nodes of a network.
 
@@ -303,26 +317,36 @@ def layout_children(node_path="/obj", paths=None):
             if not child:
                 raise ValueError(f"Node not found: {path}")
             items.append(child)
-        node.layoutChildren(items=items)
-        return {"path": node.path(), "laid_out": [item.path() for item in items]}
-    node.layoutChildren()
-    return {"path": node.path(), "laid_out": "every node in this network",
-            "warning": "Every node moved, and that includes the nodes that the user "
-                       "placed by hand. Give `paths` to move only your own nodes."}
+        layout.layout(nodes=items)
+        report = {"path": node.path(), "laid_out": [item.path() for item in items]}
+        faults = layout.problems(node, items)
+    else:
+        layout.layout(node)
+        report = {"path": node.path(), "laid_out": "every node in this network",
+                  "warning": "Every node moved, and that includes the nodes that the user "
+                             "placed by hand. Give `paths` to move only your own nodes."}
+        faults = layout.problems(node)
+    if faults:
+        report["layout_problems"] = faults
+    return report
+
+
+MADE = "houdinimcp_made"
 
 
 def place_node(node):
-    """Put one new node in a free place near its input, and move nothing else.
+    """Put a new node where an artist would: under its input, in a free slot.
 
     Houdini's own layout moves every node in the network. A new node that
-    places itself removes the reason to call that.
+    places itself removes the reason to call that. Only the readers of the
+    node move, and only down, to make room. The node is marked as made by an
+    agent, so a later wire can place it again without a move of a node that
+    the user placed. Returns the layout faults that involve the node.
     """
-    try:
-        node.moveToGoodPosition(relative_to_inputs=True, move_inputs=False,
-                                move_outputs=False, move_unconnected=False)
-    except (hou.OperationFailed, AttributeError):
-        pass
-    return list(node.position())
+    node.setUserData(MADE, "1")
+    layout.place([node])
+    faults = layout.problems(node.parent(), [node])
+    return {"layout_problems": faults} if faults else {}
 
 
 def set_node_color(node_path, color):
@@ -526,7 +550,21 @@ def connect_nodes_batch(connections):
             "src": src.path(), "dst": dst.path(),
             "dst_input": conn.get("dst_input_index", 0),
         })
-    return {"connected": len(results), "connections": results}
+    report = {"connected": len(results), "connections": results}
+    # A node that an agent made was placed before it had this wire, at either
+    # end of it. Place it again; a node that the user placed only moves down to
+    # make room, as when a new node goes in on a wire.
+    made = {node.path(): node for node in (hou.node(result[end]) for result in results
+                                           for end in ("src", "dst"))
+            if node.userData(MADE)}
+    if made:
+        layout.place(list(made.values()))
+        network = next(iter(made.values())).parent()
+        report["placed_again"] = list(made)
+        faults = layout.problems(network, list(made.values()))
+        if faults:
+            report["layout_problems"] = faults
+    return report
 
 
 def reorder_inputs(path, input_indices):

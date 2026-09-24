@@ -19,9 +19,9 @@ def create_wrangle(parent_path, wrangle_type="attribwrangle", name=None, code=""
         if not source:
             raise ValueError(f"Input node not found: {input_path}")
         node.setInput(0, source)
-    node_handler.place_node(node)
+    placed = node_handler.place_node(node)
     report = {"path": node.path(), "name": node.name(), "type": wrangle_type,
-              "position": list(node.position())}
+              "position": list(node.position()), **placed}
     if code or code_file:
         report.update(write_snippet(node.path(), code, code_file))
     return report

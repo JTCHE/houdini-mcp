@@ -37,10 +37,12 @@ def tool(mode: str = "create",
         "flags"            — path, display, render, bypass. The display flag
                              and the render flag are different flags.
         "color"            — path, color as [r, g, b] from 0 to 1.
-        "layout"           — path: tidy the children of that network. Give
-                             `paths` to move only those nodes. Without it the
-                             whole network moves, including the nodes the user
-                             placed by hand, and the result says so.
+        "layout"           — path: lay out the children of that network in
+                             rows, each node under its inputs. Give `paths` to
+                             place only those nodes next to what they connect
+                             to. Without it the whole network moves, including
+                             the nodes the user placed by hand, and the result
+                             says so.
         "wrangle"          — parent_path with code to make a wrangle, or path
                              with code to write into one. code_file reads the
                              code from a file, so a long snippet travels once.

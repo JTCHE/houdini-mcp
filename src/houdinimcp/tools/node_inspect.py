@@ -7,7 +7,7 @@ MUTATES = False
 
 MODES = ("info", "parms", "schema", "changed", "names", "expression", "keyframes", "code",
          "cook_chain", "explain", "material", "image", "channels", "simulation",
-         "render_settings", "cache", "time_dependency", "validate", "readers")
+         "render_settings", "cache", "time_dependency", "validate", "readers", "layout")
 
 
 def run(paths, mode="info", parm=None, include_all_parms=False, object_name=None,
@@ -89,6 +89,8 @@ def _one(path, mode, parm, include_all_parms, object_name, field_name, channel, 
         return cache.get_cache_status(path)
     if mode == "validate":
         return nodes.validate_names(path)
+    if mode == "layout":
+        return nodes.layout_problems(path)
     if mode == "readers":
         _needs(parm, "readers", "a parameter name")
         return parameters.readers(path, parm)
