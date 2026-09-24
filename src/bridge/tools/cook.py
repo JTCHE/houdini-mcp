@@ -33,6 +33,11 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
                         SOP such as a Pyro, FLIP, Vellum or RBD solver. After
                         you change anything inside a solver, reset it: the node
                         gives its old result back with no error and no warning.
+                        On a solver SOP it cooks the sources first, cooks the
+                        start frame after the reset, and reports the
+                        primitives there. It fails when the result is empty
+                        while the sources are not: that simulation stays
+                        empty on every frame.
 
     frames: one frame, a list of frames, or {"start": 1001, "end": 1010,
     "step": 2}. frame_range is [start, end] and means every frame between.
