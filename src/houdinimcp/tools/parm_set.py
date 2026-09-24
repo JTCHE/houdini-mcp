@@ -3,7 +3,7 @@
 A write can be accepted and have no effect, so each result says what the
 parameter holds after the write.
 """
-from . import as_list, unknown_mode
+from . import items_of, unknown_mode
 from ..handlers import animation, chops, parameters, rendering
 
 MUTATES = True
@@ -15,8 +15,7 @@ MODES = ("value", "press", "expression", "keyframe", "keyframes", "delete_keyfra
 def run(items=None, mode="value", **defaults):
     """Run one mode over one item or a list of items."""
     results = []
-    for item in as_list(items) or [{}]:
-        arguments = {**defaults, **item}
+    for arguments in items_of(mode, items, defaults):
         try:
             results.append(_one(mode, arguments))
         except Exception as error:

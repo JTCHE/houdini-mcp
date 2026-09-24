@@ -34,5 +34,23 @@ def as_list(value):
     return value if isinstance(value, list) else [value]
 
 
+class Arguments(dict):
+    """The arguments of one item. A missing one names itself and the mode,
+    because a bare KeyError says nothing about what the call lacks."""
+
+    def __init__(self, mode, values):
+        super().__init__(values)
+        self.mode = mode
+
+    def __missing__(self, key):
+        raise ValueError(f"mode '{self.mode}' needs the argument '{key}'.")
+
+
+def items_of(mode, items, defaults):
+    """One item or a list of them, each merged over the defaults."""
+    return ([Arguments(mode, {**defaults, **item}) for item in as_list(items)]
+            or [Arguments(mode, defaults)])
+
+
 def unknown_mode(mode, known):
     return ValueError(f"Unknown mode '{mode}'. Use one of: {', '.join(known)}.")

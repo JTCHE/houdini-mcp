@@ -3,7 +3,7 @@
 Every mode takes one item or a list of items. Houdini adds a numeric suffix
 when a name is already used, so each result carries the path that Houdini gave.
 """
-from . import as_list, unknown_mode
+from . import items_of, unknown_mode
 from ..handlers import chops, cops, lop, materials, nodes, takes, vex, viewport
 
 MUTATES = True
@@ -18,10 +18,8 @@ def run(items=None, mode="create", **defaults):
     An item is a dictionary of the arguments for the mode. Arguments given
     outside `items` are defaults for every item.
     """
-    given = as_list(items) or [{}]
     results = []
-    for item in given:
-        arguments = {**defaults, **item}
+    for arguments in items_of(mode, items, defaults):
         try:
             results.append(_one(mode, arguments))
         except Exception as error:
