@@ -47,7 +47,9 @@ def _one(mode, item):
     if mode == "delete":
         return nodes.delete_node(item["path"])
     if mode == "copy":
-        return nodes.copy_node(item["path"], item["destination_path"])
+        return nodes.copy_nodes(item.get("paths") or [item["path"]],
+                                item.get("destination_path"), item.get("suffix"),
+                                item.get("names"))
     if mode == "move":
         if "destination_path" in item:
             return nodes.move_node(item["path"], item["destination_path"])

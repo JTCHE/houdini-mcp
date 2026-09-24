@@ -442,17 +442,77 @@ def set_expression(node_path, parm_name, expression, language="hscript"):
     }
 
 
-def copy_node(path, destination_path):
-    """Copy a node to a new parent."""
-    node = hou.node(path)
-    if not node:
-        raise ValueError(f"Node not found: {path}")
-    dest = hou.node(destination_path)
-    if not dest:
+COPY_OF = "houdinimcp_copy_of"
+
+
+def copy_nodes(paths, destination_path=None, suffix=None, names=None):
+    """Copy a set of nodes, and say which copy came from which node.
+
+    `hou.copyNodesTo` returns the copies in an order of its own, so a loop
+    that pairs the sources with the copies by position names them wrong. Each
+    source carries its path in its user data during the copy, and the copy
+    that carries the same data is its copy. The wires inside the set stay; a
+    wire from a node outside the set goes to the same node. Copies in the same
+    network go to the right of the sources.
+    """
+    sources = []
+    for path in paths:
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        sources.append(node)
+    network = hou.node(destination_path) if destination_path else sources[0].parent()
+    if network is None:
         raise ValueError(f"Destination not found: {destination_path}")
-    items = hou.copyNodesTo([node], dest)
-    new_node = items[0]
-    return {"path": new_node.path(), "name": new_node.name(), "type": new_node.type().name()}
+    for node in sources:
+        node.setUserData(COPY_OF, node.path())
+    try:
+        copies = {copy.userData(COPY_OF): copy for copy in hou.copyNodesTo(sources, network)}
+    finally:
+        for node in sources:
+            node.destroyUserData(COPY_OF, must_exist=False)
+    for copy in copies.values():
+        copy.destroyUserData(COPY_OF, must_exist=False)
+        copy.setUserData(MADE, "1")
+
+    inside = {node.path() for node in sources}
+    unwired, renamed = [], []
+    for node in sources:
+        copy = copies[node.path()]
+        # A wire from outside the set: the copy reads the same node.
+        for wire in node.inputConnections():
+            source, index = wire.inputNode(), wire.inputIndex()
+            if source is None or source.path() in inside or copy.input(index) is not None:
+                continue
+            if source.parent() == network:
+                copy.setInput(index, source, wire.outputIndex())
+            else:
+                unwired.append({"copy": copy, "input": index, "was": source.path()})
+        wanted = (names or {}).get(node.path()) or (names or {}).get(node.name()) \
+            or (node.name() + suffix if suffix else None)
+        if wanted:
+            copy.setName(wanted, unique_name=True)
+            if copy.name() != wanted:
+                renamed.append({"asked": wanted, "got": copy.name()})
+
+    if network == sources[0].parent():
+        xs = [node.position()[0] for node in sources]
+        shift = hou.Vector2(max(xs) - min(xs) + layout.COLUMN_STEP, 0.0)
+        for node in sources:
+            copies[node.path()].setPosition(node.position() + shift)
+    report = {"copies": {path: copy.path() for path, copy in copies.items()},
+              "network": network.path()}
+    if renamed:
+        report["renamed_by_houdini"] = renamed
+    if unwired:
+        # The path after the rename, so it is the path that exists.
+        report["not_wired"] = [{**entry, "copy": entry["copy"].path()} for entry in unwired]
+        report["note"] = ("These inputs came from nodes in another network, so the copies "
+                          "have no input there. Wire them with connect.")
+    faults = layout.problems(network, list(copies.values()))
+    if faults:
+        report["layout_problems"] = faults
+    return report
 
 
 def move_node(path, destination_path):
