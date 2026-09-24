@@ -18,7 +18,7 @@ from . import offscreen, timing, viewport
 SLOW_STEP = 2
 
 
-def _render(node_path, wanted, size, color_by, color_range, azimuth, elevation, fill):
+def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
     node = hou.node(node_path)
     if node is None:
         raise ValueError(f"Node not found: {node_path}")
@@ -33,8 +33,7 @@ def _render(node_path, wanted, size, color_by, color_range, azimuth, elevation, 
     direction = offscreen._orbit_direction(azimuth, elevation) \
         if azimuth is not None or elevation is not None else "persp"
     view, _ = offscreen._aim(box, direction, fill=fill)
-    return offscreen.draw([node], view, wanted, size, color_by=color_by,
-                          color_range=color_range)
+    return offscreen.draw([node], view, wanted, size, **look)
 
 
 def _label(image, text):
@@ -46,7 +45,7 @@ def _label(image, text):
 
 def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
           tile_width=320, background=96, reference=None, azimuth=None, elevation=None,
-          fill=0.9, color_by=None, color_range=None, output=None):
+          fill=0.9, output=None, **look):
     """A contact sheet: the node at each frame, in a grid, with the frame
     number on each tile, and a reference picture first when one is given."""
     from PIL import Image
@@ -64,8 +63,8 @@ def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
         tile.paste(picture, ((size[0] - picture.width) // 2, (size[1] - picture.height) // 2))
         _label(tile, "reference")
         tiles.append(tile)
-    for frame, path in zip(wanted, _render(node_path, wanted, size, color_by, color_range,
-                                            azimuth, elevation, fill)):
+    for frame, path in zip(wanted, _render(node_path, wanted, size, azimuth, elevation,
+                                            fill, **look)):
         tile = offscreen.over_grey(path, background)
         _label(tile, f"{frame:g}")
         tiles.append(tile)
@@ -87,7 +86,7 @@ def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
 
 
 def movie(node_path, frames=None, fps=24, width=640, background=96, azimuth=None,
-          elevation=None, fill=0.9, color_by=None, color_range=None, output=None):
+          elevation=None, fill=0.9, output=None, **look):
     """An MP4 of the node over the frames, or over the playbar range."""
     if frames is None:
         first, last = hou.playbar.frameRange()[:2]
@@ -95,7 +94,7 @@ def movie(node_path, frames=None, fps=24, width=640, background=96, azimuth=None
     wanted = timing.frame_list(frames)
     # The encoder refuses an odd width or height.
     size = (int(width) // 2 * 2, int(width) * 3 // 4 // 2 * 2)
-    drawn = _render(node_path, wanted, size, color_by, color_range, azimuth, elevation, fill)
+    drawn = _render(node_path, wanted, size, azimuth, elevation, fill, **look)
     folder = os.path.dirname(drawn[0])
     for index, (frame, path) in enumerate(zip(wanted, drawn)):
         tile = offscreen.over_grey(path, background)

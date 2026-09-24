@@ -23,7 +23,9 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          elevation: float = None, start: float = None, step: float = 1,
          count: int = 12, columns: int = None, tile_width: int = 320,
          background: int = 96, reference: str = None, color_by: str = None,
-         color_range: List[float] = None, fps: float = 24) -> list[Image | str]:
+         color_range: List[float] = None, fps: float = 24, contour: float = None,
+         slab: List[Union[str, float]] = None,
+         vectors: float = None) -> list[Image | str]:
     """Make a picture of the scene and look at it.
 
     Use it to confirm your own work: numbers in a node do not tell you that the
@@ -54,7 +56,16 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         grey `background` (0-255, 96 by default: smoke reads best on mid
         grey). `color_by` colours the points by an attribute, blue at the low
         end of `color_range` [low, high] and red at the high end; a vector
-        attribute uses its length.
+        attribute uses its length. To see where a point attribute lives, use
+        "sheet" with one frame and these:
+            contour — a step: colour by the fraction of the value over the
+                      step. The lines of equal value show the shape of a
+                      field, for example the shells of a distance field.
+            slab    — [axis, thickness], for example ["z", 0.1]: only the
+                      points in a thin cut through the middle, so the inside
+                      of a solid cloud shows.
+            vectors — a scale: a line along the `color_by` vector from up to
+                      about 3000 points. An empty result is an error.
 
     A Houdini with no window has no viewport, and there an OpenGL ROP draws the
     same picture from the same arguments over a grey background. It runs in a
@@ -118,7 +129,8 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                               "columns": columns, "tile_width": tile_width,
                               "background": background, "reference": reference,
                               "color_by": color_by, "color_range": color_range,
-                              "fps": fps},
+                              "fps": fps, "contour": contour, "slab": slab,
+                              "vectors": vectors},
                   timeout=300.0)
 
     contents = []

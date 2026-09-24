@@ -18,7 +18,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         radius=None, fill=0.9, frame_range=None, frames=None,
         resolution=None, azimuth=None, elevation=None, start=None, step=1,
         count=12, columns=None, tile_width=320, background=96, reference=None,
-        color_by=None, color_range=None, fps=24):
+        color_by=None, color_range=None, fps=24, contour=None, slab=None,
+        vectors=None):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
     if mode in ("sheet", "movie"):
@@ -28,7 +29,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
             raise ValueError(f"mode '{mode}' needs `node`.")
         shared = dict(node_path=node, background=background, azimuth=azimuth,
                       elevation=elevation, fill=fill, color_by=color_by,
-                      color_range=color_range, output=output)
+                      color_range=color_range, contour=contour, slab=slab,
+                      vectors=vectors, output=output)
         if mode == "sheet":
             return sheets.sheet(frames=frames, start=start, step=step, count=count,
                                 columns=columns, tile_width=tile_width,

@@ -116,11 +116,20 @@ def _camera_view(camera):
                  camera.evalParm("orthowidth"))
 
 
-def draw(sources, view, frames, size, shading=None, color_by=None, color_range=None):
+def draw(sources, view, frames, size, shading=None, color_by=None, color_range=None,
+         contour=None, slab=None, vectors=None):
     """Draw SOP nodes at each frame, and return one PNG with alpha per frame.
 
-    `view` is a view from _aim, or a camera node read at each frame.
+    `view` is a view from _aim, or a camera node read at each frame. `slab`
+    is [axis, thickness]: only the points in that cut through the middle.
+    `contour` is a step: colour by the fraction of the value over it.
+    `vectors` is a scale: a line along the vector `color_by` from the points.
     """
+    if (contour or vectors) and not color_by:
+        raise ValueError("contour and vectors read the attribute that color_by names.")
+    if slab is not None and (len(slab) != 2 or str(slab[0]) not in ("x", "y", "z")
+                             or float(slab[1]) <= 0):
+        raise ValueError(f"slab is [axis, thickness], for example ['z', 0.1], not {slab}.")
     if shading is not None and shading not in SHADING:
         raise ValueError(f"Unknown shading: {shading}. Use: {list(SHADING)}")
     if not sources:
@@ -135,6 +144,9 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
                 raise ValueError(f"{node.path()} has no float point attribute "
                                  f"'{color_by}' of 1 to 4 values. Point attributes: {names}")
             color_size = attrib.size()
+            if vectors and color_size != 3:
+                raise ValueError(f"vectors needs a vector attribute, and '{color_by}' has "
+                                 f"{color_size} values.")
     folder = viewport.new_file("mcp_draw", "")
     os.makedirs(folder)
     views = []
@@ -149,7 +161,8 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
                        for number in range(len(sources))],
            "views": views, "count": len(frames), "size": [int(size[0]), int(size[1])],
            "shading": SHADING[shading or "smooth"], "picture": picture,
-           "color_by": color_by, "color_size": color_size, "color_range": color_range}
+           "color_by": color_by, "color_size": color_size, "color_range": color_range,
+           "contour": contour, "slab": slab, "vectors": vectors}
     with open(os.path.join(folder, "job.json"), "w") as handle:
         json.dump(job, handle)
     hython = os.path.join(hou.getenv("HFS"), "bin", "hython.exe" if os.name == "nt" else "hython")
@@ -163,10 +176,16 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
         raise RuntimeError(f"The OpenGL ROP drew {len(written) - len(missing)} of "
                            f"{len(written)} frames. hython said: "
                            f"{(result.stderr or result.stdout).strip()[-800:]}")
-    if all(viewport.blank(path) for path in written):
+    if all(_empty(path) for path in written):
         raise RuntimeError(f"The OpenGL ROP drew nothing at any of the {len(written)} frames. "
                            f"The geometry is outside the view, or it is empty.")
     return written
+
+
+def _empty(path):
+    """True when no pixel of the picture is drawn: its alpha is zero."""
+    from PIL import Image
+    return Image.open(path).convert("RGBA").getchannel("A").getbbox() is None
 
 
 def over_grey(path, background=96):

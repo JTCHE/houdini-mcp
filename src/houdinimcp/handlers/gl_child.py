@@ -22,19 +22,39 @@ def main(job):
         holder = hou.node("/obj").createNode("geo", f"source{index}")
         last = holder.createNode("file")
         last.parm("file").set(pattern)
+        if job.get("slab"):
+            # A thin cut through the middle: the inside of a solid cloud shows.
+            # A Blast keeps every point when it cannot read its group, so a
+            # wrangle removes them.
+            axis, thickness = "xyz".index(job["slab"][0]), float(job["slab"][1])
+            last = _wrangle(holder, last, "slab",
+                            f'if (abs(@P[{axis}] - getbbox_center(0)[{axis}]) > '
+                            f'{thickness / 2}) removepoint(0, @ptnum);')
         if job.get("color_by"):
-            colour = holder.createNode("attribwrangle")
-            colour.setInput(0, last)
             low, high = job.get("color_range") or (0.0, 1.0)
-            # Blue at the low end, red at the high end. A vector reads as its
-            # length.
             kind = KINDS[job["color_size"]]
-            colour.parm("snippet").set(
-                f'{kind} read = point(0, "{job["color_by"]}", @ptnum);\n'
-                f'float value = {"abs" if kind == "float" else "length"}(read);\n'
-                f'float t = clamp(fit(value, {float(low)}, {float(high)}, 0, 1), 0, 1);\n'
-                f'@Cd = lerp({{0.1, 0.2, 1}}, {{1, 0.2, 0.1}}, t);')
-            last = colour
+            # Blue at the low end, red at the high end. A vector reads as its
+            # length. A contour step colours by the fraction of the value over
+            # the step, so the lines of equal value show the shape of a field.
+            shade = (f'frac(value / {float(job["contour"])})' if job.get("contour") else
+                     f'clamp(fit(value, {float(low)}, {float(high)}, 0, 1), 0, 1)')
+            last = _wrangle(holder, last, "colour",
+                            f'{kind} read = point(0, "{job["color_by"]}", @ptnum);\n'
+                            f'float value = {"abs" if kind == "float" else "length"}(read);\n'
+                            f'float t = {shade};\n'
+                            f'@Cd = lerp({{0.1, 0.2, 1}}, {{1, 0.2, 0.1}}, t);')
+        if job.get("vectors"):
+            # One line along the vector from a share of the points, at most
+            # about 3000 lines, so that the picture stays readable.
+            last = _wrangle(holder, last, "vectors",
+                            f'int stride = max(1, npoints(0) / 3000);\n'
+                            f'if (@ptnum % stride == 0) {{\n'
+                            f'    vector tip = @P + vector(point(0, "{job["color_by"]}", '
+                            f'@ptnum)) * {float(job["vectors"])};\n'
+                            f'    int end = addpoint(0, tip);\n'
+                            f'    setpointattrib(0, "Cd", end, @Cd);\n'
+                            f'    addprim(0, "polyline", @ptnum, end);\n'
+                            f'}}')
         last.setDisplayFlag(True)
         last.setRenderFlag(True)
         drawn.append(last)
@@ -63,8 +83,23 @@ def main(job):
     for node in drawn:
         node.cook(force=True)
         if node.errors():
-            sys.exit(f"{node.type().name()}: {' '.join(node.errors())}")
+            sys.exit(f"{node.name()}: {' '.join(node.errors())}")
+        cut = node.parent().node("slab")
+        if cut is not None and not cut.geometry().points():
+            sys.exit(f"The slab of {job['slab'][1]} along {job['slab'][0]} kept no point. "
+                     f"Make it thicker than the space between the points.")
+        if job.get("vectors"):
+            before = len(node.inputs()[0].geometry().prims())
+            if len(node.geometry().prims()) == before:
+                sys.exit("The vector lines came out empty.")
     rop.render(frame_range=(1, job["count"], 1), verbose=False)
+
+
+def _wrangle(holder, above, name, code):
+    node = holder.createNode("attribwrangle", name)
+    node.setInput(0, above)
+    node.parm("snippet").set(code)
+    return node
 
 
 if __name__ == "__main__":
