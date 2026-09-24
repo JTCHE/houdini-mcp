@@ -19,7 +19,8 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          radius: float = None, fill: float = 0.9,
          frame_range: List[float] = None,
          frames: Union[float, List[float], Dict[str, float]] = None,
-         resolution: List[int] = None) -> list[Image | str]:
+         resolution: List[int] = None, azimuth: float = None,
+         elevation: float = None) -> list[Image | str]:
     """Make a picture of the scene and look at it.
 
     Use it to confirm your own work: numbers in a node do not tell you that the
@@ -38,16 +39,20 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                      path of the files, not a picture.
 
     A Houdini with no window has no viewport, and there an OpenGL ROP draws the
-    same picture from the same arguments: a camera and a ROP are built for the
-    call and removed after it. `frames` then takes one frame, a list of frames,
-    or {"start": 1, "end": 10, "step": 2}.
+    same picture from the same arguments, with a camera and a ROP that the
+    tool keeps for its next call.
 
     There is no picture of the network editor: every Houdini pane is a native
     GL drawable, and Qt draws nothing into it. Read the graph with node_inspect.
 
     node: the node to look at. Its display flag is set for the picture and the
-    node that held the flag gets it back after. Without `frame` the view also
-    frames that node.
+    node that held the flag gets it back after. When the viewer shows another
+    network, it shows the network of the node for the picture and goes back
+    after. Without `frame` the view also frames that node.
+
+    frames: one frame, a list, or {"start": 1, "end": 10, "step": 2}: one
+    picture for each, and the playbar goes back after. A picture that holds
+    only the background is an error, not a result.
 
     Aim the view with any of these:
         frame      — "selection", "all", or the path of a node: frame the view
@@ -59,6 +64,11 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         radius     — the distance between the two.
         direction  — "top", "front", "left", "right", "back", "bottom",
                      "persp".
+        azimuth    — turn the view around what it frames, in degrees around
+                     the up axis; with `elevation`, the degrees above the
+                     ground. 0 and 0 look from the front; azimuth 45 and
+                     elevation 30 give a three-quarter view. Nothing is added
+                     to the scene.
         camera     — look through this camera node.
         shading    — "smooth", "smooth_wire", "flat", "wireframe".
         renderer   — the Hydra renderer of a viewer on a LOP network, for
@@ -66,7 +76,8 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                      available.
 
     output: where to write the file. Without it, Houdini writes to a temporary
-    file. resolution is [width, height].
+    file. resolution is [width, height]; the height follows the shape of
+    the viewport, so the picture is not stretched.
 
     Returns the picture, plus JSON with the state of the window: the frame, the
     open file, the selection, the network in front, and which nodes carry the
@@ -82,8 +93,9 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                               "frame": frame, "target": target,
                               "look_from": look_from, "radius": radius,
                               "fill": fill, "frame_range": frame_range,
-                              "frames": frames,
-                              "resolution": resolution}, timeout=300.0)
+                              "frames": frames, "resolution": resolution,
+                              "azimuth": azimuth, "elevation": elevation},
+                  timeout=300.0)
 
     contents = []
     if mode != "flipbook":

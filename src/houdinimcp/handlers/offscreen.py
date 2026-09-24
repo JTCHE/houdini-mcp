@@ -4,6 +4,7 @@ hython has no viewport, and that is where most agent work happens. An OpenGL
 ROP draws without one, so the same capture call answers in both kinds of
 session: this builds a camera and a ROP, renders, and removes them again.
 """
+import math
 import os
 
 import hou
@@ -41,9 +42,18 @@ def _box(node):
     return box
 
 
+def _orbit_direction(azimuth, elevation):
+    """The direction from the target to the eye for an orbit angle in degrees.
+    0 and 0 look along -Z, from the front, as in the viewport."""
+    turn, lift = math.radians(azimuth or 0.0), math.radians(elevation or 0.0)
+    return (math.sin(turn) * math.cos(lift), math.sin(lift),
+            math.cos(turn) * math.cos(lift))
+
+
 def _aim(camera, box, direction="persp", target=None, look_from=None,
          radius=None, fill=0.9):
-    """Put the camera where it sees the box, with room around it."""
+    """Put the camera where it sees the box, with room around it. `direction`
+    is a name, or a direction vector from the target to the eye."""
     middle = hou.Vector3(target) if target is not None else box.center()
     if look_from is not None:
         where = hou.Vector3(look_from)
@@ -52,7 +62,8 @@ def _aim(camera, box, direction="persp", target=None, look_from=None,
         # The aperture and the focal length of the camera say how wide it sees.
         half = camera.evalParm("aperture") / (2.0 * camera.evalParm("focal"))
         away = radius if radius is not None else (size * 0.5) / (half * float(fill or 1.0))
-        offset = hou.Vector3(DIRECTIONS.get(direction, DIRECTIONS["persp"])).normalized()
+        offset = hou.Vector3(direction if isinstance(direction, tuple)
+                             else DIRECTIONS.get(direction, DIRECTIONS["persp"])).normalized()
         where = middle + offset * away
     camera.parmTuple("t").set(tuple(where))
     look = hou.hmath.buildRotateLookAt(where, middle, hou.Vector3(0, 1, 0))
@@ -62,7 +73,7 @@ def _aim(camera, box, direction="persp", target=None, look_from=None,
 
 def capture(node_path=None, output=None, frames=None, resolution=None,
             camera=None, direction="persp", target=None, look_from=None,
-            radius=None, fill=0.9, shading=None):
+            radius=None, fill=0.9, shading=None, azimuth=None, elevation=None):
     """Draw a node, or the whole scene, at one frame or at several.
 
     The camera and the ROP live only for this call. Give `camera` to look
@@ -91,6 +102,8 @@ def capture(node_path=None, output=None, frames=None, resolution=None,
         aimed = None
     else:
         eye = _kept_node("/obj", "cam", CAMERA_NAME)
+        if azimuth is not None or elevation is not None:
+            direction = _orbit_direction(azimuth, elevation)
         aimed = _aim(eye, _box(node), direction, target, look_from, radius, fill)
 
     rop = _kept_node("/out", "opengl", ROP_NAME)

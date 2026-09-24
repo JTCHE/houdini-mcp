@@ -16,7 +16,7 @@ MODES = ("viewport", "quad", "camera", "flipbook")
 def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         shading=None, renderer=None, frame=None, target=None, look_from=None,
         radius=None, fill=0.9, frame_range=None, frames=None,
-        resolution=None):
+        resolution=None, azimuth=None, elevation=None):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
     if not hou.isUIAvailable():
@@ -26,7 +26,7 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
             node_path=node, output=output, frames=_span(frames, frame_range),
             resolution=resolution, camera=camera, direction=direction or "persp",
             target=target, look_from=look_from, radius=radius, fill=fill,
-            shading=shading)
+            shading=shading, azimuth=azimuth, elevation=elevation)
         return {**result, "window_state": _state()}
 
     if mode == "flipbook" and not (frames or frame_range):
@@ -37,7 +37,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         mode=mode, node=node, output=output, camera=camera,
         direction=direction, shading=shading, renderer=renderer, frame=frame,
         target=target, look_from=look_from, radius=radius, fill=fill,
-        frame_range=frame_range, frames=frames, resolution=resolution)
+        frame_range=frame_range, frames=frames, resolution=resolution,
+        azimuth=azimuth, elevation=elevation)
     return {**result, "window_state": _state()}
 
 
