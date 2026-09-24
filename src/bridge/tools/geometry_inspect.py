@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Union
 from ..connection import call_json
 
 
-def tool(path: str, mode: str = "summary", start: int = 0, count: int = 100,
+def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, count: int = 100,
          attribs: List[str] = None, attrib_name: str = None,
          attrib_class: str = "point", group_name: str = None,
          group_type: str = "point", prim_index: int = 0,
@@ -14,7 +14,8 @@ def tool(path: str, mode: str = "summary", start: int = 0, count: int = 100,
          unique: bool = False, against: str = None, match_attrib: str = "name",
          pattern: str = None, name: str = None, names: List[str] = None,
          positions: List[List[float]] = None, from_node: str = None,
-         steps: List[Dict[str, Any]] = None, bins: int = 0, limit: int = None) -> str:
+         steps: List[Dict[str, Any]] = None, bins: int = None, limit: int = None,
+         reduce: str = None, threshold: float = None) -> str:
     """Read the geometry that a node produces. This cooks the node.
 
     Use it to confirm that a node made what you expected: the point count, an
@@ -23,7 +24,8 @@ def tool(path: str, mode: str = "summary", start: int = 0, count: int = 100,
 
     Do not use it to read parameters: node_inspect does that.
 
-    path: the SOP or COP node to read.
+    path: the SOP or COP node to read, or a list of them. A list keeps going
+    after a node that fails, and each result names its path.
 
     frames: read at other frames without moving the playbar of the user. One
     number, a list, or {"start": 1001, "end": 1010, "step": 2}. The result then
@@ -58,11 +60,20 @@ def tool(path: str, mode: str = "summary", start: int = 0, count: int = 100,
                            scene. Use it to learn what a node would make.
         "volume_stats"   — every volume or VDB: resolution, voxel size, the
                            extremes, the mean, percentiles. `name` reads one,
-                           `bins` adds a histogram.
-        "volume_voxels"  — one field as a flat array with its shape and its
-                           transform. `name` is the field, `limit` the numbers.
+                           `bins` adds a histogram, `threshold` counts the
+                           voxels below and above it.
+        "volume_voxels"  — one field as an array indexed [z][y][x], with its
+                           shape and its transform. `name` is the field.
+                           `reduce` gives one answer instead: "sum", "mean",
+                           "max", "min", or "project_x", "project_y",
+                           "project_z" (the sum along that axis, a 2D array).
+                           An array past `limit` numbers is thinned.
         "volume_sample"  — read `names` (fields) at `positions`, or at the
-                           points of `from_node`. The work runs in VEX.
+                           points of `from_node`, with no node added to the
+                           scene. Returns min, max, mean, percentiles, a
+                           histogram of `bins` (10), the counts on each side of
+                           `threshold`, and the values when there are at most
+                           `limit` (1000).
         "volume_compare" — how much of the field `name` sits in each band of the
                            field `against`. The answer to "how much smoke is
                            inside the collider".
@@ -83,5 +94,5 @@ def tool(path: str, mode: str = "summary", start: int = 0, count: int = 100,
         "output": output, "frames": frames, "unique": unique, "against": against,
         "match_attrib": match_attrib, "pattern": pattern, "name": name, "names": names,
         "positions": positions, "from_node": from_node, "steps": steps, "bins": bins,
-        "limit": limit,
+        "limit": limit, "reduce": reduce, "threshold": threshold,
     }, timeout=300.0)
