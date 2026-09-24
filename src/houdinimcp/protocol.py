@@ -106,6 +106,8 @@ def sessions() -> list:
     except OSError:
         return []
     for name in names:
+        if not name.endswith(".json"):
+            continue
         path = os.path.join(SESSIONS_DIR, name)
         try:
             with open(path) as handle:
@@ -117,6 +119,18 @@ def sessions() -> list:
 
 def _session_file(port: int) -> str:
     return os.path.join(SESSIONS_DIR, f"{port}.json")
+
+
+def interrupt_file(port: int) -> str:
+    """The bridge writes this file to stop the call that runs on this port. The
+    plugin cannot read the socket while a call holds its main thread."""
+    return os.path.join(SESSIONS_DIR, f"{port}.interrupt")
+
+
+def output_file(port: int) -> str:
+    """What a running script has printed so far, for a caller that cannot wait
+    for the answer."""
+    return os.path.join(SESSIONS_DIR, f"{port}.out")
 
 
 def encode(message) -> bytes:

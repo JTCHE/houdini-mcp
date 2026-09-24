@@ -1,5 +1,6 @@
 """Node CRUD, wiring, flags, layout, and material handlers."""
 import hou
+from .parameters import inert
 
 
 def create_node(node_type, parent_path="/obj", name=None, position=None, parameters=None,
@@ -139,7 +140,7 @@ def get_node_info(path, include_all_parms=False):
         "category": node_type.category().name(),
         "position": [node.position()[0], node.position()[1]],
         "color": list(color.rgb()),
-        "is_bypassed": node.isBypassed(),
+        "is_bypassed": getattr(node, "isBypassed", lambda: None)(),
         "is_displayed": getattr(node, "isDisplayFlagSet", lambda: None)(),
         "is_rendered": getattr(node, "isRenderFlagSet", lambda: None)(),
         "inputs": [],
@@ -609,7 +610,7 @@ def validate_names(path):
     for parm in node.parms():
         if parm.parmTemplate().type() != hou.parmTemplateType.String:
             continue
-        if parm.isAtDefault() or parm.isDisabled():
+        if parm.isAtDefault() or inert(parm):
             continue
         try:
             value = parm.eval()

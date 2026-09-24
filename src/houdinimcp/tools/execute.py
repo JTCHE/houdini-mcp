@@ -8,9 +8,9 @@ MODES = ("python", "hscript", "expression", "vex_check", "env")
 
 
 def run(source=None, mode="python", language="hscript", name=None, file=None,
-        globals=None):
+        globals=None, args=None, timeout=None):
     if mode == "python":
-        return code.execute_code(source, True, file, globals)
+        return code.execute_code(source, True, file, globals, args, timeout)
     if mode == "hscript":
         return code.execute_hscript(source)
     if mode == "expression":

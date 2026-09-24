@@ -1,13 +1,17 @@
 """Parameter read/write handlers.
 
-Houdini accepts a write that changes nothing, and it says nothing. Five cases
+Houdini accepts a write that changes nothing, and it says nothing. These cases
 do it: an expression, a keyframe, a lock, a parameter that another parameter
-disables, and a channel reference, which sends the value to another node. One
-function, `_write`, looks for all five, so every path that writes a parameter
-reports the same truth.
+disables or hides, a strict range that clamps the value, a bit field written
+by its token, and a channel reference, which sends the value to another node.
+One function, `_write`, looks for all of them, so every path that writes a
+parameter reports the same truth. `execute` reports the same through
+`script_write_note`.
 """
 import difflib
 import fnmatch
+import operator
+import re
 
 import hou
 
@@ -20,6 +24,18 @@ def _menu(template):
     return (items, list(template.menuLabels() or ())) if items else (None, None)
 
 
+def _bits(template):
+    """{token: bit} of a menu whose value is a sum of bits, or None.
+
+    Such a menu takes several items at once, and a write of one token stores
+    the index of the item, not its bit: "rotate" becomes 1, which means
+    "translate".
+    """
+    if template.type() != hou.parmTemplateType.Menu or             template.menuType() != hou.menuType.StringToggle:
+        return None
+    return {token: 1 << index for index, token in enumerate(template.menuItems())}
+
+
 def _expression(parm):
     try:
         return parm.expression()
@@ -27,32 +43,113 @@ def _expression(parm):
         return None
 
 
-def _disable_rule(parm):
-    """The rule that can grey this parameter out, as Houdini writes it.
+# One term of a Disable When or Hide When rule: `name op value`.
+_TERM = re.compile(r"""(\w+(?:\(\d+\))?)\s*(==|!=|<=|>=|=~|!~|<|>)\s*("[^"]*"|'[^']*'|[^\s"']+)""")
+_COMPARE = {"==": operator.eq, "!=": operator.ne, "<": operator.lt, ">": operator.gt,
+            "<=": operator.le, ">=": operator.ge}
 
-    A disabled parameter keeps a value that the cook never reads, so a value
-    that looks like live data is not. `hou.Parm.isDisabled` answers only in a
-    graphical session, so the rule itself goes in the result as well: a caller
-    can read the parameters that the rule names and decide.
+
+def _term_holds(node, name, op, value):
+    """True or False for one term, None for a form this reader does not know."""
+    value = value.strip("\"'")
+    function = re.fullmatch(r"hasinput\((\d+)\)", name)
+    if function:
+        index = int(function.group(1))
+        inputs = node.inputs()
+        text = number = int(index < len(inputs) and inputs[index] is not None)
+    else:
+        other = node.parm(name)
+        if other is None:
+            return None
+        try:
+            text, number = other.evalAsString(), other.eval()
+        except hou.OperationFailed:
+            return None
+    if op in ("=~", "!~"):
+        return fnmatch.fnmatch(str(text), value) == (op == "=~")
+    try:
+        return _COMPARE[op](float(number), float(value))
+    except (TypeError, ValueError):
+        # A menu compares its token, and a string its text.
+        return _COMPARE[op](str(text), value)
+
+
+def _rule_holds(node, rule):
+    """Whether a Disable When or Hide When rule holds now: (True, the group
+    that makes it hold), (False, None), or (None, None) when the rule has a form
+    this reader does not know.
+
+    Houdini writes the rule as groups in braces. A group holds when every term
+    in it holds, and the rule holds when any group does.
     """
-    try:
-        conditionals = parm.parmTemplate().conditionals()
-    except Exception:
-        return None, None
-    rule = conditionals.get(hou.parmCondType.DisableWhen)
-    try:
-        disabled = parm.isDisabled()
-    except Exception:
-        disabled = False
-    return disabled, rule
+    unknown = False
+    for group in re.findall(r"\{([^}]*)\}", rule) or [None]:
+        terms = _TERM.findall(group or "")
+        if not terms or _TERM.sub("", group).strip():
+            unknown = True
+            continue
+        results = [_term_holds(node, *term) for term in terms]
+        if None in results:
+            unknown = True
+        elif all(results):
+            return True, "{ " + group.strip() + " }"
+    return (None, None) if unknown else (False, None)
 
 
-def _disabled_by(parm):
-    """A message when this parameter is disabled, or may be. Else None."""
-    disabled, rule = _disable_rule(parm)
-    if disabled:
-        return rule or "another parameter or the node state"
-    return None
+def state(parm):
+    """Whether the cook reads this parameter now, and if not, why.
+
+    A disabled or a hidden parameter keeps a value that the cook does not read,
+    so a value that looks like live data is not. `hou.Parm.isDisabled` and
+    `isHidden` answer only in a graphical session, so the rules are also read
+    here, from the values of the parameters that they name. Returns a
+    dictionary with "disabled" and "hidden" (the group of the rule that holds),
+    or "disabled_when" and "hidden_when" (a rule this reader cannot decide).
+    """
+    found = {}
+    template = parm.parmTemplate()
+    try:
+        conditionals = template.conditionals()
+    except hou.OperationFailed:
+        conditionals = {}
+    for kind, key, asked in ((hou.parmCondType.DisableWhen, "disabled", "isDisabled"),
+                             (hou.parmCondType.HideWhen, "hidden", "isHidden")):
+        rule = conditionals.get(kind)
+        try:
+            shown = getattr(parm, asked)()
+        except hou.OperationFailed:
+            shown = False
+        holds, group = _rule_holds(parm.node(), rule) if rule else (False, None)
+        if shown or holds:
+            found[key] = group or rule or "the node state"
+        elif holds is None:
+            found[f"{key}_when"] = rule
+    if template.isHidden():
+        found["hidden"] = "the parameter template, always"
+    return found
+
+
+def inert(parm):
+    """True when the cook of the node does not read this parameter now."""
+    found = state(parm)
+    return "disabled" in found or "hidden" in found
+
+
+def _state_warnings(found):
+    """The sentences that say what `state` found."""
+    lines = []
+    if "disabled" in found:
+        lines.append(f"the parameter is disabled while {found['disabled']} holds, so the "
+                     f"cook does not read the value. Change that condition first.")
+    if "hidden" in found:
+        lines.append(f"the parameter is hidden while {found['hidden']} holds: the user "
+                     f"cannot see it, and in this mode the node most likely does not "
+                     f"read it.")
+    for key, word in (("disabled_when", "disabled"), ("hidden_when", "hidden")):
+        if key in found:
+            lines.append(f"this parameter is {word} when {found[key]}, and this tool "
+                         f"cannot decide that rule. Read the parameters that it names.")
+    return lines
 
 
 def _referenced(parm):
@@ -83,13 +180,15 @@ def describe(parm, with_menu=True):
     }
     if parm.isLocked():
         report["is_locked"] = True
-    disabled, rule = _disable_rule(parm)
-    if disabled:
-        report["is_disabled"] = True
-    # The rule matters where a value was written: a written value that the cook
-    # ignores reads as live data. A default value under a rule is only noise.
-    if rule and not report["is_at_default"]:
-        report["disabled_when"] = rule
+    found = state(parm)
+    for key in ("disabled", "hidden"):
+        if key in found:
+            report[f"{key}_by"] = found[key]
+    # An undecided rule matters where a value was written: a written value that
+    # the cook ignores reads as live data. At the default it is only noise.
+    if not report["is_at_default"]:
+        report.update({key: found[key] for key in ("disabled_when", "hidden_when")
+                       if key in found})
     expression = _expression(parm)
     if expression:
         report["expression"] = expression
@@ -106,7 +205,11 @@ def describe(parm, with_menu=True):
         report["menu_labels"] = labels
         # eval() on a menu that stores an index never returns the token, so a
         # caller that compares them is always wrong. Give both.
-        if isinstance(value, int) and 0 <= value < len(tokens):
+        bits = _bits(template)
+        if bits:
+            report["bit_field"] = bits
+            report["bits_set"] = [token for token, bit in bits.items() if value & bit]
+        elif isinstance(value, int) and 0 <= value < len(tokens):
             report["menu_token"] = tokens[value]
     return report
 
@@ -165,7 +268,13 @@ def _write(node, parm_name, value, follow_reference=False):
     template = parm.parmTemplate()
     tokens, _labels = _menu(template)
     report = {"parm": parm_name, "old": parm.eval()}
-    warnings = []
+    bits = _bits(template)
+    if bits and isinstance(value, (str, list, tuple)):
+        try:
+            value = _bit_sum(bits, value)
+        except ValueError as error:
+            return {**report, "applied": False, "bit_field": bits, "reason": str(error)}
+        report["bits"] = value
 
     target = _referenced(parm)
     if target and not follow_reference:
@@ -193,11 +302,10 @@ def _write(node, parm_name, value, follow_reference=False):
     report["applied"] = _took(parm, value, tokens)
     if tokens:
         report["menu_tokens"] = tokens
-
+    warnings = []
     if target:
         report["wrote_to"] = target.path()
-        warnings.append(f"the value went to {target.path()}, not to "
-                        f"{node.path()}/{parm_name}, because this parameter reads it.")
+    clamped = _range_note(template, value, report["new"])
     if expression and not report["applied"]:
         report["expression"] = expression
         report["reason"] = ("the parameter carries an expression, which still decides the "
@@ -206,23 +314,13 @@ def _write(node, parm_name, value, follow_reference=False):
         report["keyframe_count"] = len(parm.keyframes())
         warnings.append("the parameter is animated: the value became a new key at this frame.")
     elif not report["applied"]:
-        report["reason"] = _refused_reason(parm, template, tokens, value)
+        report["reason"] = clamped or _refused_reason(parm, template, tokens, value)
+    elif clamped:
+        warnings.append(clamped)
 
-    disabled, rule = _disable_rule(parm)
-    if disabled:
-        report["is_disabled"] = True
-        warnings.append(f"the parameter is disabled by {rule or 'the node state'}, so the "
-                        f"value is in the node and the cook does not read it. Change that "
-                        f"condition first.")
-    elif rule:
-        report["disabled_when"] = rule
-        warnings.append(f"this parameter is greyed out, and the cook ignores it, when "
-                        f"{rule} is true. Houdini reports the state only in a graphical "
-                        f"session, so read the parameters that this rule names and confirm "
-                        f"that the value is live.")
-    expanded = _expansion_warning(parm, template)
-    if expanded:
-        warnings.append(expanded)
+    found = state(parm)
+    report.update({f"{key}_by": found[key] for key in ("disabled", "hidden") if key in found})
+    warnings += write_notes(parm, target, found)
     if warnings:
         report["warnings"] = warnings
     return report
@@ -233,14 +331,73 @@ def _refused_reason(parm, template, tokens, value):
     if tokens:
         return (f"'{value}' is not a token of this menu. Tokens: {', '.join(map(str, tokens))}. "
                 f"The parameter holds {parm.rawValue()!r} now.")
-    if hasattr(template, "minValue") and isinstance(value, (int, float)):
-        low, high = template.minValue(), template.maxValue()
-        if template.minIsStrict() and value < low:
-            return f"the value is below the strict minimum {low}."
-        if template.maxIsStrict() and value > high:
-            return f"the value is over the strict maximum {high}."
     return (f"Houdini kept {parm.eval()!r} for a write of {value!r}. The parameter type is "
             f"{template.type().name()}.")
+
+
+def _bit_sum(bits, value):
+    """The number to store in a bit-field menu for a token, a list of tokens,
+    or tokens in one text with spaces between them."""
+    names = value.split() if isinstance(value, str) else list(value)
+    unknown = [name for name in names if name not in bits]
+    if unknown:
+        raise ValueError(f"{', '.join(map(repr, unknown))} is not a token of this bit-field "
+                         f"menu. It stores the sum of the bits of the chosen items: "
+                         f"{bits}. Write a token, a list of tokens or a number.")
+    return sum(bits[name] for name in set(names))
+
+
+def _range_note(template, asked, now):
+    """What a range did to a number that was written: the clamp of a strict
+    range, or a value past the slider, which Houdini keeps. None when neither."""
+    if not hasattr(template, "minValue") or isinstance(asked, bool) \
+            or not isinstance(asked, (int, float)):
+        return None
+    low, high = template.minValue(), template.maxValue()
+    if (template.minIsStrict() and asked < low) or (template.maxIsStrict() and asked > high):
+        return (f"Houdini clamped {asked} to {now}: this parameter accepts only "
+                f"{low} to {high}. Values past that end all give the same result.")
+    if asked < low or asked > high:
+        return (f"{asked} is past the slider range {low} to {high}. Houdini kept it, "
+                f"because that range is only a slider limit, but the node was not tuned "
+                f"for it.")
+    return None
+
+
+def write_notes(parm, target=None, found=None):
+    """The warnings after a write to `parm` that the write itself cannot show:
+    the node it really changed, a state that makes the cook ignore it, and
+    text that Houdini expands."""
+    notes = []
+    if target:
+        notes.append(f"the value went to {target.path()}, not to {parm.path()}, because "
+                     f"this parameter reads it through a channel reference.")
+    notes += _state_warnings(state(parm) if found is None else found)
+    expanded = _expansion_warning(parm, parm.parmTemplate())
+    if expanded:
+        notes.append(expanded)
+    return notes
+
+
+def script_write_note(parm, value, target):
+    """One line for a parameter that a script wrote in a way that changes
+    nothing, or changes something else. None for a plain write. `target` is
+    the parameter that a channel reference sent the write to, read before it."""
+    template = parm.parmTemplate()
+    notes = write_notes(parm, target)
+    bits = _bits(template)
+    if bits and isinstance(value, str):
+        notes.append(f"this menu is a bit field, and Houdini stored {value!r} as the "
+                     f"item index {parm.eval()}, not as its bit. Write the sum of the "
+                     f"bits: {bits}.")
+    range_note = _range_note(template, value, parm.eval())
+    if range_note:
+        notes.append(range_note)
+    expression = _expression(parm)
+    if expression and not target:
+        notes.append(f"the parameter carries the expression {expression!r}, which "
+                     f"still decides the value.")
+    return f"{parm.path()}: " + " ".join(notes) if notes else None
 
 
 def _expansion_warning(parm, template):
@@ -308,7 +465,7 @@ def press_button(node_path, parm_name, cook_after=True):
     if kind not in (hou.parmTemplateType.Button, hou.parmTemplateType.Toggle):
         raise ValueError(f"{node_path}/{parm_name} is a {kind.name()} parameter, not a button. "
                          f"Write a value to it with mode 'value'.")
-    condition = _disabled_by(parm)
+    condition = state(parm).get("disabled")
     parm.pressButton()
     report = {"path": node_path, "parm": parm_name, "pressed": True,
               "errors": list(node.errors()), "warnings": list(node.warnings())}
@@ -344,8 +501,12 @@ def get_parameter_schema(node_path, parm=None, pattern=None):
         if hasattr(template, "minValue"):
             info["min"] = template.minValue()
             info["max"] = template.maxValue()
-        if one.isDisabled():
-            info["is_disabled"] = True
+        found = state(one)
+        info.update({f"{key}_by": found[key] for key in ("disabled", "hidden")
+                     if key in found})
+        bits = _bits(template)
+        if bits:
+            info["bit_field"] = bits
         schema.append(info)
     return {"path": node_path, "count": len(schema), "parameters": schema}
 

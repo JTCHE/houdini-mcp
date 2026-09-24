@@ -6,7 +6,7 @@ import traceback
 
 import hou
 
-from . import protocol
+from . import protocol, watchdog
 from .tools import dispatch
 
 EXTENSION_NAME = "Houdini MCP"
@@ -63,6 +63,7 @@ class HoudiniMCPServer:
         self.socket.listen(1)
         self.port = self.socket.getsockname()[1]
         protocol.announce(self.port, identity())
+        watchdog.start()
         self.socket.setblocking(False)
         self.running = True
         if hou.isUIAvailable():
@@ -149,9 +150,17 @@ class HoudiniMCPServer:
         Every answer names the session that made it. The scene file can change
         between two calls, so the identity is read now, not at start.
         """
+        name = command.get("type", "")
+        watcher = watchdog.watch(name, self.port)
         try:
-            result = dispatch(command.get("type", ""), command.get("params", {}))
+            with watcher:
+                result = dispatch(name, command.get("params", {}))
             answer = {"status": "success", "result": result}
+        except watchdog.Stopped:
+            answer = {"status": "error",
+                      "message": f"'{name}' was stopped because "
+                                 f"{watcher.reason or 'the watchdog stopped it'}. What it "
+                                 f"changed before that stays in the scene; undo reverts it."}
         except Exception as error:
             traceback.print_exc()
             answer = {"status": "error", "message": f"{type(error).__name__}: {error}"}
