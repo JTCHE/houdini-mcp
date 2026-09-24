@@ -13,6 +13,7 @@ from typing import Optional
 
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
+from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata
 
 # name -> Tool, filled by build(). batch validates its steps against these.
 TOOLS = {}
@@ -30,8 +31,24 @@ def build() -> list:
         model.model_config["extra"] = "forbid"
         model.model_rebuild(force=True)
         tool.parameters = model.model_json_schema(by_alias=True)
+        tool.fn_metadata = _Metadata.model_construct(**{
+            key: getattr(tool.fn_metadata, key) for key in FuncMetadata.model_fields})
         TOOLS[name] = tool
     return list(TOOLS.values())
+
+
+class _Metadata(FuncMetadata):
+    """The SDK reads a text argument as JSON when the type of the argument is
+    not plain `str`, so that a list sent as text becomes a list. An optional
+    argument is not plain `str`, and then the text "null" becomes nothing and
+    "true" a boolean: node_type "null" was lost. Text that reads as null or as
+    a boolean stays text; a list or an object is still read."""
+
+    def pre_parse_json(self, data):
+        parsed = super().pre_parse_json(data)
+        return {key: data[key] if isinstance(data[key], str)
+                and (value is None or isinstance(value, bool)) else value
+                for key, value in parsed.items()}
 
 
 def validate(name: str, params: dict) -> None:
