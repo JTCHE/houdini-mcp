@@ -4,12 +4,13 @@ A write can be accepted and have no effect, so each result says what the
 parameter holds after the write.
 """
 from . import items_of, unknown_mode
-from ..handlers import animation, chops, parameters, rendering
+from ..handlers import animation, chops, parameters, rendering, snapshots
 
 MUTATES = True
 
 MODES = ("value", "press", "expression", "keyframe", "keyframes", "delete_keyframe",
-         "revert", "lock", "link", "spare", "render_settings", "chop_export")
+         "revert", "lock", "link", "spare", "render_settings", "chop_export", "snapshot",
+         "restore", "diff")
 
 
 def run(items=None, mode="value", **defaults):
@@ -58,4 +59,15 @@ def _one(mode, item):
     if mode == "chop_export":
         return chops.export_chop_to_parm(item["chop_path"], item["channel_name"],
                                          item["path"], item["parm"])
+    if mode == "snapshot":
+        return snapshots.snapshot(item["name"], item.get("paths") or [item["path"]])
+    if mode == "restore":
+        return snapshots.restore(item["name"], _paths(item))
+    if mode == "diff":
+        return snapshots.diff(item["name"], _paths(item))
     raise unknown_mode(mode, MODES)
+
+
+def _paths(item):
+    """The nodes a restore or a diff is limited to, or None for the whole record."""
+    return item.get("paths") or ([item["path"]] if item.get("path") else None)

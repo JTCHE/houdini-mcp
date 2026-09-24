@@ -13,18 +13,20 @@ def tool(mode: str = "value",
          src_path: str = None, src_parm: str = None, name: str = None,
          label: str = None, parm_type: str = None, default: Any = None,
          settings: Dict[str, Any] = None, chop_path: str = None,
-         channel_name: str = None, follow_reference: bool = False) -> str:
+         channel_name: str = None, follow_reference: bool = False,
+         paths: List[str] = None) -> str:
     """Write parameter values, or press a button. One write, or a list in one
     undo group.
 
     Use it after node_inspect has confirmed the parameter name and the type.
 
     A write can be accepted and change nothing, and Houdini says nothing. This
-    tool looks for all five causes and names the one it found:
+    tool looks for all six causes and names the one it found:
       - the parameter carries an expression, which still decides the value;
       - the parameter is animated, so the value became a new key;
       - the parameter is locked;
-      - another parameter disables it, so the cook does not read it;
+      - another parameter disables or hides it, so the cook does not read it;
+      - a strict range clamped the value;
       - the parameter reads another node through a channel reference, so the
         write would change that other node. It is refused; give
         `follow_reference=true` to write the node at the other end.
@@ -33,7 +35,8 @@ def tool(mode: str = "value",
     mode, and the arguments that each mode reads:
         "value"           — path, parm, value. Or path and parameters, a
                             dictionary of several names and values. A menu
-                            takes its token, for example "custom".
+                            takes its token, for example "custom". A
+                            bit-field menu takes a token or a list of them.
         "press"           — path, parm: press a button, for example Save to
                             Disk on a File Cache, Reload on a File SOP, or
                             Resimulate on a solver. The result holds the errors
@@ -55,6 +58,18 @@ def tool(mode: str = "value",
                             parameters, a list of those dictionaries.
         "render_settings" — path, settings for a ROP node.
         "chop_export"     — chop_path, channel_name, path, parm.
+        "snapshot"        — name, paths: save every parameter of these nodes,
+                            with expressions, keys and the bypass flag, to the
+                            record `name` on disk. "/obj/geo1/*" names every
+                            node in a network. It overwrites a record of the
+                            same name.
+        "restore"         — name: put the record back, and list what changed.
+                            `paths` limits it to some of the nodes.
+        "diff"            — name: list how the scene differs from the record.
+                            Changes nothing.
+                            In a sweep, restore before each variant, not once
+                            at the end: a variant that does not name a
+                            parameter keeps the value of the one before.
 
     items: a list of items for several writes, each item a dictionary with the
     same keys. An argument given outside `items` is the default for every item.
@@ -70,6 +85,6 @@ def tool(mode: str = "value",
         ("src_parm", src_parm), ("name", name), ("label", label),
         ("parm_type", parm_type), ("default", default), ("settings", settings),
         ("chop_path", chop_path), ("channel_name", channel_name),
-        ("follow_reference", follow_reference or None),
+        ("follow_reference", follow_reference or None), ("paths", paths),
     ) if given is not None})
     return call_json("parm_set", arguments)
