@@ -41,7 +41,8 @@ That prompt is the whole brief. This is what it means.
 5. Test each change in a live Houdini before you call it done. Start your own
    session: never work in the Houdini the user has open. See
    [Testing](testing.md) and [Deployment](deployment.md).
-6. When a change answers a spec, set `Status: Closed`.
+6. When a change answers a spec, append a dated line to it and set
+   `Status: Closed`.
 
 A spec that turns out to be wrong, or that the mission rules out, gets the same
 dated line saying that, and why. Say it in the chat as well.

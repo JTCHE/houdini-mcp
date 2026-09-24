@@ -34,4 +34,4 @@ what shape a change must take. Every other rule here serves it.
   imports is not a plugin that answers. See [Deployment](agents/deployment.md):
   Houdini runs a copy, so run the installer and restart the plugin first. Start
   your own session; never work in the Houdini the user has open.
-- When a change answers a spec, append a dated line to it. Never set `Status`.
+- When a change answers a spec, append a dated line to it and set `Status: Closed`.
