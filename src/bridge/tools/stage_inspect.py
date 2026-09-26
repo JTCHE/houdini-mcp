@@ -1,11 +1,14 @@
 """stage_inspect — the USD stage that a LOP node makes."""
+from typing import Dict, List, Union
+
 from ..connection import call_json
 
 
 def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = None,
          type_name: str = None, attr_name: str = None, root_prim: str = "/",
          max_depth: int = 3, layer_index: int = 0, count: int = 10,
-         include_attrs: bool = False) -> str:
+         include_attrs: bool = False,
+         frames: Union[float, List[float], Dict[str, float]] = None) -> str:
     """Read the USD stage at a LOP node. This cooks the node.
 
     Use it in a Solaris (LOP) network to see the prims, the layers and the
@@ -30,6 +33,13 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
         "modified"    — the last `count` prims that this node changed. Use it
                         to see what one LOP did.
         "lights"      — the lights on the stage.
+        "transform"   — where `prim_path` is in the world: translate, rotate
+                        and scale composed through every parent. With
+                        `frames`, the path of a moving prim.
+
+    frames: read the same mode at another frame, or at several: one frame, a
+    list of frames, or {"start": 1, "end": 10, "step": 2}. The playbar goes
+    back to where it was.
 
     Returns JSON.
     """
@@ -37,5 +47,5 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
         "path": path, "mode": mode, "prim_path": prim_path, "pattern": pattern,
         "type_name": type_name, "attr_name": attr_name, "root_prim": root_prim,
         "max_depth": max_depth, "layer_index": layer_index, "count": count,
-        "include_attrs": include_attrs,
+        "include_attrs": include_attrs, "frames": frames,
     }, timeout=180.0)

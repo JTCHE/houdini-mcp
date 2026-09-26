@@ -129,6 +129,28 @@ def get_usd_attribute(path, prim_path, attr_name):
     return {"prim": prim_path, "attr": attr_name, "value": str(attr.Get()), "type": str(attr.GetTypeName())}
 
 
+def world_transform(path, prim_path):
+    """Where a prim is in the world at the current frame: the composed
+    transform of the prim and every parent, not the local xformOps."""
+    from pxr import Usd, UsdGeom
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    prim = node.stage().GetPrimAtPath(prim_path)
+    if not prim:
+        raise ValueError(f"Prim not found: {prim_path}")
+    if not prim.IsA(UsdGeom.Xformable):
+        raise ValueError(f"{prim_path} is a {prim.GetTypeName() or 'typeless'} prim, and it "
+                         f"has no transform.")
+    matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode(hou.frame()))
+    # USD and Houdini both store a row-major matrix with the translation last.
+    parts = hou.Matrix4([list(row) for row in matrix]).explode()
+    return {"prim": prim_path,
+            "translate": [round(value, 6) for value in parts["translate"]],
+            "rotate": [round(value, 6) for value in parts["rotate"]],
+            "scale": [round(value, 6) for value in parts["scale"]]}
+
+
 def set_usd_attribute(path, prim_path, attr_name, value):
     """Set a USD attribute value."""
     node = hou.node(path)

@@ -1,16 +1,26 @@
 """The USD stage of a LOP node: prims, layers, attributes, composition."""
 from . import unknown_mode
-from ..handlers import lop
+from ..handlers import lop, timing
 
 MUTATES = False
 
 MODES = ("stage", "prims", "prim", "search", "layer", "attribute", "composition",
-         "variants", "stats", "modified", "lights")
+         "variants", "stats", "modified", "lights", "transform")
 
 
 def run(path, mode="stage", prim_path=None, pattern=None, type_name=None,
         attr_name=None, root_prim="/", max_depth=3, layer_index=0, count=10,
-        include_attrs=False):
+        include_attrs=False, frames=None):
+    arguments = (path, mode, prim_path, pattern, type_name, attr_name, root_prim,
+                 max_depth, layer_index, count, include_attrs)
+    if frames is not None:
+        # The same read at each frame, with the playbar put back after.
+        return timing.at_frames(frames, lambda: _one(*arguments))
+    return _one(*arguments)
+
+
+def _one(path, mode, prim_path, pattern, type_name, attr_name, root_prim, max_depth,
+         layer_index, count, include_attrs):
     if mode == "stage":
         return lop.lop_stage_info(path)
     if mode == "prims":
@@ -43,6 +53,9 @@ def run(path, mode="stage", prim_path=None, pattern=None, type_name=None,
         return lop.get_last_modified_prims(path, count)
     if mode == "lights":
         return lop.list_lights(path)
+    if mode == "transform":
+        _needs(prim_path, "transform")
+        return lop.world_transform(path, prim_path)
     raise unknown_mode(mode, MODES)
 
 
