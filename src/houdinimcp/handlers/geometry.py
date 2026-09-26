@@ -17,6 +17,22 @@ def messages(node):
     return {"errors": list(node.errors()), "warnings": list(node.warnings())}
 
 
+def failure(node, most=20):
+    """Every node that holds an error where a failed cook of `node` can come
+    from: the node, the nodes upstream of it, and the nodes inside it. A
+    solver often fails on a node that one of its parameters names, and
+    hou.OperationFailed says only "Error while cooking"."""
+    found = []
+    for other in [node] + list(node.inputAncestors()) + list(node.allSubChildren()):
+        try:
+            told = messages(other)
+        except hou.OperationFailed:
+            continue
+        if told["errors"] or (other == node and told["warnings"]):
+            found.append({"path": other.path(), "type": other.type().name(), **told})
+    return found[:most]
+
+
 def resolve(node_path, frame=None):
     """The node and its geometry, cooked, with the node's own reason on failure.
 
@@ -33,9 +49,8 @@ def resolve(node_path, frame=None):
     try:
         geometry = node.geometryAtFrame(frame) if frame is not None else node.geometry()
     except hou.OperationFailed as error:
-        told = messages(node)
         raise ValueError(f"{node_path} did not cook: {error}. "
-                         f"errors={told['errors']} warnings={told['warnings']}") from error
+                         f"Nodes that report an error: {failure(node)}") from error
     if geometry is None:
         told = messages(node)
         raise ValueError(

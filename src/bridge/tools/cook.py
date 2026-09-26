@@ -47,7 +47,12 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
     and what it did not, in the same result as the cook.
 
     Returns JSON: the seconds in total, for each frame, and the slowest frame,
-    with the errors and the warnings of every node. A cook can take minutes:
+    with the errors and the warnings of every node. Each frame also gives the
+    point count, the primitive count and the bounds of each SOP: one call
+    checks that a result moves or grows over a range. `ok` is false when a
+    node failed to cook, and `failed` then names each node upstream of it or
+    inside it that holds an error, with the text: the node that broke is
+    often another node than the one you cooked. A cook can take minutes:
     the call waits, and a timeout does not stop the cook. Cook a long range in
     parts of a few seconds, so that one call does not block Houdini past the
     timeout.

@@ -7,6 +7,8 @@ import time
 
 import hou
 
+from .geometry import failure
+
 
 def frame_list(frames, default=None):
     """The frames a caller asked for, as a list of numbers.
@@ -67,19 +69,34 @@ def cook_over(nodes, frames, force=True):
     wanted = frame_list(frames, [hou.frame()])
     per_frame = []
     errors, warnings = [], []
+    failed = {}
     with keep_frame():
         for frame in wanted:
             hou.setFrame(frame)
             started = time.time()
             for node in nodes:
-                node.cook(force=force)
-            per_frame.append({"frame": frame, "seconds": round(time.time() - started, 3)})
+                try:
+                    node.cook(force=force)
+                except hou.OperationFailed as error:
+                    record = failed.setdefault(node.path(), {
+                        "path": node.path(), "message": str(error).strip(),
+                        "nodes_with_errors": failure(node), "frames": []})
+                    record["frames"].append(frame)
+            entry = {"frame": frame, "seconds": round(time.time() - started, 3)}
+            # Counts and bounds at each frame answer most "does it move, does it
+            # grow" questions without a script that cooks and prints.
+            geometry = [_shape(node) for node in nodes if node.path() not in failed]
+            if any(geometry):
+                entry["geometry"] = [shape for shape in geometry if shape]
+            per_frame.append(entry)
             for node in nodes:
                 errors += [f"{node.path()}: {line}" for line in node.errors()]
                 warnings += [f"{node.path()}: {line}" for line in node.warnings()]
     seconds = [entry["seconds"] for entry in per_frame]
     slowest = max(per_frame, key=lambda entry: entry["seconds"])
     return {
+        "ok": not failed and not errors,
+        "failed": list(failed.values()),
         "frames": len(per_frame),
         "total_seconds": round(sum(seconds), 3),
         "mean_seconds": round(sum(seconds) / len(seconds), 3),
@@ -91,3 +108,16 @@ def cook_over(nodes, frames, force=True):
         "errors": sorted(set(errors)),
         "warnings": sorted(set(warnings)),
     }
+
+
+def _shape(node):
+    """Point and primitive counts and the bounds of what a SOP cooked, or None."""
+    geometry = node.geometry() if isinstance(node, hou.SopNode) else None
+    if geometry is None:
+        return None
+    box = geometry.boundingBox()
+    return {"path": node.path(),
+            "points": geometry.intrinsicValue("pointcount"),
+            "prims": geometry.intrinsicValue("primitivecount"),
+            "bounds": [[round(value, 4) for value in box.minvec()],
+                       [round(value, 4) for value in box.maxvec()]] if box.isValid() else None}

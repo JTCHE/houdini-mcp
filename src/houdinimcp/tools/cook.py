@@ -3,6 +3,7 @@ import hou
 
 from . import as_list, unknown_mode
 from ..handlers import cache, dops, timing
+from ..handlers.geometry import failure
 
 MUTATES = True
 
@@ -23,7 +24,10 @@ def run(paths, mode="cook", frame_range=None, frames=None, num_steps=1,
         try:
             results.append({"path": path, "result": _one(path, mode, frame_range, num_steps)})
         except Exception as error:
-            results.append({"path": path, "error": f"{type(error).__name__}: {error}"})
+            node = hou.node(path)
+            results.append({"path": path, "ok": False,
+                            "error": f"{type(error).__name__}: {error}",
+                            "nodes_with_errors": failure(node) if node else []})
     return results[0] if len(results) == 1 else {"count": len(results), "results": results}
 
 
