@@ -25,7 +25,7 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          background: int = 96, reference: str = None, color_by: str = None,
          color_range: List[float] = None, fps: float = 24, contour: float = None,
          slab: List[Union[str, float]] = None,
-         vectors: float = None) -> list[Image | str]:
+         vectors: float = None, settle: float = None) -> list[Image | str]:
     """Make a picture of the scene and look at it.
 
     Use it to confirm your own work: numbers in a node do not tell you that the
@@ -105,7 +105,15 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         shading    — "smooth", "smooth_wire", "flat", "wireframe".
         renderer   — the Hydra renderer of a viewer on a LOP network, for
                      example "Karma CPU". An unknown name lists the ones
-                     available.
+                     available. `camera` can then be a USD camera prim.
+        settle     — the seconds that a renderer such as Karma draws before
+                     each picture. Karma starts from noise, and a picture
+                     taken at once is blank. 20 to 30 gives a clean frame.
+                     With `frames`, or in mode "flipbook", it renders a
+                     sequence through the viewport, one frame at a time,
+                     with no husk and no render license, and gives the
+                     seconds of each frame. The renderer, the
+                     shading and the camera guides go back after.
 
     output: where to write the file. Without it, Houdini writes to a temporary
     file. resolution is [width, height]; the height follows the shape of
@@ -132,8 +140,8 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                               "background": background, "reference": reference,
                               "color_by": color_by, "color_range": color_range,
                               "fps": fps, "contour": contour, "slab": slab,
-                              "vectors": vectors},
-                  timeout=300.0)
+                              "vectors": vectors, "settle": settle},
+                  timeout=300.0 + (settle or 0) * 1.5 * _count(frames))
 
     contents = []
     if mode not in ("flipbook", "movie"):
@@ -141,6 +149,17 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
             contents.append(_picture(path, result))
     return [item for item in contents if item is not None] + \
            [json.dumps(result, indent=2, default=str)]
+
+
+def _count(frames) -> int:
+    """How many pictures `frames` asks for, to size the wait."""
+    if isinstance(frames, list):
+        return len(frames)
+    if isinstance(frames, dict):
+        step = abs(float(frames.get("step") or 1))
+        return int(abs(float(frames.get("end", frames["start"])) - float(frames["start"]))
+                   / step) + 1
+    return 1
 
 
 def _paths(result) -> list:

@@ -19,7 +19,7 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         resolution=None, azimuth=None, elevation=None, start=None, step=1,
         count=12, columns=None, tile_width=320, background=96, reference=None,
         color_by=None, color_range=None, fps=24, contour=None, slab=None,
-        vectors=None):
+        vectors=None, settle=None):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
     if mode in ("sheet", "movie"):
@@ -51,12 +51,18 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         frame_range = list(hou.playbar.frameRange())
     if mode == "camera" and not camera:
         raise ValueError("mode 'camera' needs the path of a camera node.")
-    result = viewport.capture(
+    return _with_state(viewport.capture(
         mode=mode, node=node, output=output, camera=camera,
         direction=direction, shading=shading, renderer=renderer, frame=frame,
         target=target, look_from=look_from, radius=radius, fill=fill,
         frame_range=frame_range, frames=frames, resolution=resolution,
-        azimuth=azimuth, elevation=elevation)
+        azimuth=azimuth, elevation=elevation, settle=settle))
+
+
+def _with_state(capture):
+    """A viewport capture waits in the event loop (see server._step), so the
+    state of the window is read when it ends."""
+    result = yield from capture
     return {**result, "window_state": _state()}
 
 

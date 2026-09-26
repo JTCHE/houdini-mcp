@@ -42,17 +42,25 @@ def get_viewport_info():
     }
 
 
-def set_viewport_camera(camera_path):
-    """Set the viewport camera to a specific camera node."""
-    viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
-    if not viewer:
-        raise RuntimeError("No scene viewer found")
+def look_through(viewer, port, camera_path):
+    """Look through a camera node, or in a viewer on a LOP network, through
+    the USD camera prim at that path. A generator: see server._step."""
     cam = hou.node(camera_path)
-    if not cam:
+    if cam:
+        port.setCamera(cam)
+        return
+    if viewer.pwd().childTypeCategory() != hou.lopNodeTypeCategory():
         raise ValueError(f"Camera not found: {camera_path}")
-    viewport = viewer.curViewport()
-    viewport.setCamera(cam)
-    return {"camera": camera_path}
+
+    # A viewer that has just moved to the network loads the stage in the event
+    # loop, and until then it knows no camera prim.
+    def looking():
+        port.setCamera(camera_path)
+        return port.cameraPath() == camera_path
+
+    yield 10.0, looking
+    if not looking():
+        raise ValueError(f"The stage has no camera prim at {camera_path}.")
 
 
 def set_viewport_display(shading_mode=None, guide=None):
@@ -174,6 +182,28 @@ def kept_view(port):
                 port.setDefaultCamera(stash)
                 port.useDefaultCamera()
         except hou.Error:
+            pass
+
+
+@contextmanager
+def kept_look(viewer):
+    """Put back the Hydra renderer, the shading and the camera guides that a
+    capture changes. Enter it after kept_network: each network has its own."""
+    # Outside LOPs the viewer has no Hydra renderer and no camera guides.
+    in_lops = viewer.pwd().childTypeCategory() == hou.lopNodeTypeCategory()
+    renderer = viewer.currentHydraRenderer() if in_lops else None
+    cameras = viewer.showCameras() if in_lops else None
+    shading = _shown_set(viewer).shadedMode()
+    try:
+        yield
+    finally:
+        try:
+            if in_lops:
+                if viewer.currentHydraRenderer() != renderer:
+                    viewer.setHydraRenderer(renderer)
+                viewer.setShowCameras(cameras)
+            _shown_set(viewer).setShadedMode(shading)
+        except (hou.Error, TypeError):
             pass
 
 
@@ -306,6 +336,10 @@ def fit(port, what, fill=0.9):
     if not node:
         raise ValueError(f"frame: no node at {what}. Use 'selection', 'all', "
                          f"or the path of a node.")
+    if isinstance(node, hou.LopNode):
+        # The viewer shows the stage of the node, and a stage has no box here.
+        port.frameAll()
+        return what
     box = node.geometry().boundingBox() if hasattr(node, "geometry") else None
     if box is None or not box.isValid():
         raise ValueError(f"frame: {what} cooked no geometry to frame.")
@@ -317,21 +351,31 @@ def fit(port, what, fill=0.9):
     return what
 
 
-def write_image(viewer, port, output=None, resolution=None, frames=None):
+def write_image(viewer, port, output=None, resolution=None, frames=None, settle=None):
     """Write the viewport to a file, and confirm that the file is new and
     holds more than the background.
 
     hou.GeometryViewport has no image export in 21.0 or 22.0, so this is a
     flipbook of one frame. An image left by an earlier call must not pass for
     this one, so the time of the file is read before and after.
+
+    `settle` is the seconds that a progressive renderer such as Karma draws
+    before the grab. Karma draws only while the event loop of Houdini runs,
+    and a call holds that loop, so this is a generator: each
+    `yield (seconds, done)` gives the loop back until done() is true or the
+    seconds pass. See server._step. The flipbook of such a renderer can
+    write its file after it returns.
     """
+    import time
+    started = time.monotonic()
+    if settle:
+        yield float(settle), None
     if not output:
         output = new_file("mcp_viewport", ".png")
     output = os.path.abspath(output)
     folder = os.path.dirname(output)
     if folder:
         os.makedirs(folder, exist_ok=True)
-    before = os.path.getmtime(output) if os.path.exists(output) else None
 
     start, end = frames if frames else (hou.frame(), hou.frame())
     settings = viewer.flipbookSettings().stash()
@@ -345,17 +389,27 @@ def write_image(viewer, port, output=None, resolution=None, frames=None):
         resolution = [int(resolution[0]), max(2, round(int(resolution[0]) * height / width))]
         settings.useResolution(True)
         settings.resolution(tuple(resolution))
+    before = os.path.getmtime(output) if os.path.exists(output) else None
+
+    def written():
+        return os.path.exists(output) and os.path.getmtime(output) != before
+
     viewer.flipbook(port, settings)
     if frames:
         return {"filepath": output, "frame_range": [start, end]}
-    if not os.path.exists(output) or os.path.getmtime(output) == before:
+    if settle:
+        yield 30.0, written
+    if not written():
         raise RuntimeError(f"The flipbook wrote no image at {output}")
     if blank(output):
         raise RuntimeError(f"The picture at {output} holds only one colour: the view shows "
                            f"nothing of the scene. Frame the node with `frame`, or check "
-                           f"its display flag and the network the viewer shows.")
+                           f"its display flag and the network the viewer shows."
+                           + (f" A renderer such as Karma needs time to draw: give a larger "
+                              f"settle than {settle}." if settle else ""))
     return {"filepath": output,
-            "resolution": resolution or list(port.resolutionInPixels())}
+            "resolution": resolution or list(port.resolutionInPixels()),
+            "seconds": round(time.monotonic() - started, 2)}
 
 
 def blank(path):
@@ -393,64 +447,88 @@ def _numbered(output, name):
 def capture(mode="viewport", node=None, output=None, camera=None, direction=None,
             shading=None, renderer=None, frame=None, target=None, look_from=None,
             radius=None, fill=0.9, frame_range=None, frames=None, resolution=None,
-            azimuth=None, elevation=None):
+            azimuth=None, elevation=None, settle=None):
     """One picture of the viewport, or four, with the view put back after.
 
     Every argument that moves the view is undone when the file is written, so
-    a capture never leaves the window of the user somewhere else.
+    a capture never leaves the window of the user somewhere else. A generator,
+    like write_image.
     """
     from . import timing
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
-    port = viewer.curViewport()
     aimed = target is not None or look_from is not None or radius is not None
     orbited = azimuth is not None or elevation is not None
 
-    with kept_display(node), kept_network(viewer, node) as switched, kept_view(port):
-        if camera:
-            set_viewport_camera(camera)
-        if direction:
-            set_viewport_direction(direction)
-        if shading:
-            set_viewport_display(shading_mode=shading)
-        if renderer:
-            set_viewport_renderer(renderer)
-        # A node to look at is a node to frame, unless the caller aims by hand.
-        framed = fit(port, frame or (None if aimed or not node else node), fill)
-        if orbited:
-            orbit(port, azimuth, elevation)
-        if aimed:
-            aim(port, target, look_from, radius)
+    with kept_display(node), kept_network(viewer, node) as switched:
+        # Read the viewport after the switch: a viewport object that was used
+        # on /obj stays the viewport of /obj, and a USD camera never takes.
+        port = viewer.curViewport()
+        with kept_look(viewer), kept_view(port):
+            if renderer:
+                set_viewport_renderer(renderer)
+            if settle and viewer.pwd().childTypeCategory() == hou.lopNodeTypeCategory():
+                # Camera guides draw over the render.
+                viewer.setShowCameras(False)
+            if camera:
+                yield from look_through(viewer, port, camera)
+            if direction:
+                set_viewport_direction(direction)
+            if shading:
+                set_viewport_display(shading_mode=shading)
+            # A node to look at is a node to frame, unless the caller aims by hand
+            # or looks through a camera.
+            framed = fit(port, frame or (None if aimed or camera or not node else node), fill)
+            if orbited:
+                orbit(port, azimuth, elevation)
+            if aimed:
+                aim(port, target, look_from, radius)
 
-        if mode == "flipbook":
-            span = frame_range or (frames if isinstance(frames, (list, tuple))
-                                   else list(hou.playbar.frameRange()))
-            if not output:
-                output = new_file("mcp_flipbook", ".$F4.jpg")
-            report = write_image(viewer, port, output, resolution,
-                                 frames=(float(span[0]), float(span[-1])))
-        elif mode == "quad":
-            images = []
-            for name in ("top", "front", "right", "persp"):
-                set_viewport_direction(name)
-                fit(port, frame or (node or "all"), fill)
-                shot = write_image(viewer, port, _numbered(output, name), resolution)
-                images.append({"view": name, **shot})
-            report = {"images": images, "filepath": images[-1]["filepath"]}
-        elif frames is not None:
-            images = []
-            with timing.keep_frame():
-                for number in timing.frame_list(frames):
-                    hou.setFrame(number)
-                    shot = write_image(viewer, port, _numbered(output, f"{number:g}"),
-                                       resolution)
-                    images.append({"frame": number, **shot})
-            report = {"images": images, "filepath": images[0]["filepath"]}
-        else:
-            report = write_image(viewer, port, output, resolution)
-        if aimed or orbited:
-            report["view"] = _view(port)
+            if mode == "flipbook":
+                span = frame_range or (frames if isinstance(frames, (list, tuple))
+                                       else list(hou.playbar.frameRange()))
+                if not output:
+                    output = new_file("mcp_flipbook", ".$F4.jpg")
+                if settle:
+                    # A flipbook of a range draws every frame with GL and does
+                    # not wait for Karma. One flipbook for each frame does.
+                    images = []
+                    with timing.keep_frame():
+                        for number in timing.frame_list({"start": span[0], "end": span[-1]}):
+                            hou.setFrame(number)
+                            shot = yield from write_image(
+                                viewer, port, hou.text.expandStringAtFrame(output, number),
+                                resolution, settle=settle)
+                            images.append({"frame": number, **shot})
+                    report = {"images": images, "filepath": output}
+                else:
+                    report = yield from write_image(viewer, port, output, resolution,
+                                                    frames=(float(span[0]), float(span[-1])))
+            elif mode == "quad":
+                images = []
+                for name in ("top", "front", "right", "persp"):
+                    set_viewport_direction(name)
+                    fit(port, frame or (node or "all"), fill)
+                    shot = yield from write_image(viewer, port, _numbered(output, name),
+                                                  resolution, settle=settle)
+                    images.append({"view": name, **shot})
+                report = {"images": images, "filepath": images[-1]["filepath"]}
+            elif frames is not None:
+                images = []
+                with timing.keep_frame():
+                    for number in timing.frame_list(frames):
+                        hou.setFrame(number)
+                        shot = yield from write_image(viewer, port,
+                                                      _numbered(output, f"{number:g}"),
+                                                      resolution, settle=settle)
+                        images.append({"frame": number, **shot})
+                report = {"images": images, "filepath": images[0]["filepath"]}
+            else:
+                report = yield from write_image(viewer, port, output, resolution,
+                                                settle=settle)
+            if aimed or orbited:
+                report["view"] = _view(port)
     report["framed"] = framed
     report["displayed"] = node
     if switched:
