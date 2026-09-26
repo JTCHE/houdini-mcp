@@ -111,9 +111,14 @@ def sessions() -> list:
         path = os.path.join(SESSIONS_DIR, name)
         try:
             with open(path) as handle:
-                found.append(json.load(handle))
+                entry = json.load(handle)
         except (OSError, ValueError):
             continue
+        # A file that is not a session (a half-written one, or any other JSON
+        # value) must not crash every tool: the SDK reports that crash as a
+        # bare "Error executing tool <name>".
+        if isinstance(entry, dict) and isinstance(entry.get("port"), int):
+            found.append(entry)
     return found
 
 
