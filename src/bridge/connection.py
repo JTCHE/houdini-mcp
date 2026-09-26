@@ -214,8 +214,7 @@ def live_sessions(probe: bool = True) -> list:
     for entry in protocol.sessions():
         entry = dict(entry)
         if probe:
-            # The plugin takes one client at a time, so the socket this bridge
-            # already holds is proof, and a probe on it would be refused.
+            # The socket this bridge already holds is proof, and costs no probe.
             live = _connection is not None and _connection.sock is not None \
                 and _connection.port == entry["port"]
             entry["answers"] = live or port_is_listening(entry["port"])
@@ -534,8 +533,7 @@ def status() -> dict:
     try:
         live = connection(auto_start=False)
         report.update(live.status())
-        # The plugin takes one client at a time, so a probe while the bridge
-        # holds the socket can time out. A live socket is proof enough.
+        # A live socket is proof enough, and costs no probe.
         report["port_is_listening"] = live.sock is not None or port_is_listening(live.port)
     except HoudiniError as error:
         report.update({"connected": False, "port_is_listening": False,

@@ -33,8 +33,11 @@ class HoudiniMCPServer:
         self.port = port if port is not None else (protocol.FORCED_PORT or 0)
         self.running = False
         self.socket = None
-        self.client = None
-        self.buffer = b''
+        # Every client with the bytes it sent that do not yet make a frame.
+        # Several clients can hold a socket: a bridge, and a script that the
+        # agent runs for a long job. Their calls run one after the other.
+        self.clients = {}
+        self.busy = False
         # One object, so removeEventLoopCallback finds the callback it added.
         self._poll = self._process_server
 
@@ -60,7 +63,7 @@ class HoudiniMCPServer:
                 f"10013: see `netsh interface ipv4 show excludedportrange protocol=tcp`). "
                 f"Unset HOUDINIMCP_PORT to let the operating system pick a free port."
             ) from error
-        self.socket.listen(1)
+        self.socket.listen(8)
         self.port = self.socket.getsockname()[1]
         protocol.announce(self.port, identity())
         watchdog.start()
@@ -73,7 +76,7 @@ class HoudiniMCPServer:
     def serve_forever(self):
         """Drive the poll from this thread. For hython, which has no event loop."""
         while self.running:
-            waiting = [sock for sock in (self.socket, self.client) if sock]
+            waiting = [self.socket, *self.clients]
             select.select(waiting, [], [], 0.5)
             try:
                 self._process_server()
@@ -87,62 +90,73 @@ class HoudiniMCPServer:
         self.running = False
         if hou.isUIAvailable():
             hou.ui.removeEventLoopCallback(self._poll)
-        self._drop_client()
+        for client in list(self.clients):
+            self._drop(client)
         if self.socket:
             self.socket.close()
         self.socket = None
         protocol.withdraw(self.port)
         print("HoudiniMCP server stopped")
 
-    def _drop_client(self):
-        if self.client:
-            self.client.close()
-        self.client = None
-        self.buffer = b''
+    def _drop(self, client):
+        self.clients.pop(client, None)
+        try:
+            client.close()
+        except OSError:
+            pass
 
     def _process_server(self):
-        """Accept a client and answer every complete frame it sent. Never blocks."""
-        if not self.running:
+        """Accept new clients and answer every complete frame they sent. Never
+        blocks."""
+        # A call that lets Houdini draw (a wait for a render) runs the event
+        # loop, and with it this poll: a second call must not start inside it.
+        if not self.running or self.busy:
             return
-        try:
-            if not self.client:
-                try:
-                    self.client, address = self.socket.accept()
-                except BlockingIOError:
-                    return
-                self.client.setblocking(False)
-                print(f"Connected to client: {address}")
+        while True:
+            try:
+                client, address = self.socket.accept()
+            except (BlockingIOError, OSError):
+                break
+            client.setblocking(False)
+            self.clients[client] = b''
+            print(f"Connected to client: {address}")
+        for client in list(self.clients):
+            try:
+                self._answer(client)
+            except OSError as error:
+                print(f"HoudiniMCP: connection lost: {error}")
+                self._drop(client)
 
-            while True:
-                try:
-                    data = self.client.recv(protocol.CHUNK)
-                except BlockingIOError:
-                    break
-                if not data:
-                    print("Client disconnected")
-                    self._drop_client()
-                    return
-                self.buffer += data
-
-            commands, self.buffer = protocol.decode(self.buffer)
-            for command in commands:
-                try:
-                    response = protocol.encode(self.execute_command(command))
-                except Exception as error:
-                    # A result that cannot be written must not stop the plugin.
-                    # Without this, one bad value ends the session and every
-                    # later call reports that Houdini is not running.
-                    traceback.print_exc()
-                    response = protocol.encode({
-                        "status": "error",
-                        "message": f"The result of '{command.get('type')}' could not be "
-                                   f"sent: {type(error).__name__}: {error}"})
-                self.client.setblocking(True)
-                self.client.sendall(response)
-                self.client.setblocking(False)
-        except OSError as error:
-            print(f"HoudiniMCP: connection lost: {error}")
-            self._drop_client()
+    def _answer(self, client):
+        while True:
+            try:
+                data = client.recv(protocol.CHUNK)
+            except BlockingIOError:
+                break
+            if not data:
+                print("Client disconnected")
+                self._drop(client)
+                return
+            self.clients[client] += data
+        commands, self.clients[client] = protocol.decode(self.clients[client])
+        for command in commands:
+            self.busy = True
+            try:
+                response = protocol.encode(self.execute_command(command))
+            except Exception as error:
+                # A result that cannot be written must not stop the plugin.
+                # Without this, one bad value ends the session and every
+                # later call reports that Houdini is not running.
+                traceback.print_exc()
+                response = protocol.encode({
+                    "status": "error",
+                    "message": f"The result of '{command.get('type')}' could not be "
+                               f"sent: {type(error).__name__}: {error}"})
+            finally:
+                self.busy = False
+            client.setblocking(True)
+            client.sendall(response)
+            client.setblocking(False)
 
     def execute_command(self, command):
         """Run one tool and wrap the answer for the bridge.
