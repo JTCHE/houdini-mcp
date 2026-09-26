@@ -14,7 +14,7 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
          unique: bool = False, against: str = None, match_attrib: str = "name",
          pattern: str = None, name: str = None, names: List[str] = None,
          positions: List[List[float]] = None, from_node: str = None,
-         steps: List[Dict[str, Any]] = None, bins: int = None, limit: int = None,
+         steps: List[Dict[str, Any]] = None, bins: Union[int, List[float]] = None, limit: int = None,
          reduce: str = None, threshold: float = None) -> str:
     """Read the geometry that a node produces. This cooks the node.
 
@@ -59,9 +59,10 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
                            geometry of `path` as verbs. Nothing changes in the
                            scene. Use it to learn what a node would make.
         "volume_stats"   — every volume or VDB: resolution, voxel size, the
-                           extremes, the mean, percentiles. `name` reads one,
-                           `bins` adds a histogram, `threshold` counts the
-                           voxels below and above it.
+                           extremes, the mean, the sum, percentiles. `name`
+                           reads one, `bins` adds a histogram, `threshold`
+                           counts the voxels below and above it and gives the
+                           world box of the voxels above it.
         "volume_voxels"  — one field as an array indexed [z][y][x], with its
                            shape and its transform. `name` is the field.
                            `reduce` gives one answer instead: "sum", "mean",
@@ -76,7 +77,10 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
                            `limit` (1000).
         "volume_compare" — how much of the field `name` sits in each band of the
                            field `against`. The answer to "how much smoke is
-                           inside the collider".
+                           inside the collider". `from_node` holds `against`
+                           when another node does, such as the collider SDF.
+    bins: a count of equal bands, or a list of band edges, for example
+    [-1, 0, 0.05, 0.15, 0.25] for inside, 0-5 cm, 5-15 cm and 15-25 cm.
         "image"          — a COP node: resolution, planes, and `plane_name`.
         "volume"         — the VDB grids in a COP node.
         "export"         — write the geometry to disk. `format` is "obj",

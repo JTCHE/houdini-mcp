@@ -113,11 +113,12 @@ def _summary(numbers, bins=0, threshold=None):
         return {"count": 0}
     report = {"count": int(numbers.size), "min": float(numbers.min()),
               "max": float(numbers.max()), "mean": float(numbers.mean()),
+              "sum": float(numbers.sum()),
               "percentiles": {str(share): float(value) for share, value in
                               zip(PERCENTILES, numpy.percentile(numbers, PERCENTILES))},
               "share_above_zero": round(float((numbers > 0).mean()), 4)}
     if bins:
-        counts, edges = numpy.histogram(numbers, bins=int(bins))
+        counts, edges = numpy.histogram(numbers, bins=_bins(bins))
         report["histogram"] = [{"from": float(edges[index]), "to": float(edges[index + 1]),
                                 "count": int(count)} for index, count in enumerate(counts)]
     if threshold is not None:
@@ -126,6 +127,26 @@ def _summary(numbers, bins=0, threshold=None):
                                "at_or_above": int(numbers.size) - below,
                                "share_below": round(below / numbers.size, 4)}
     return report
+
+
+def _bins(bins):
+    """A count of equal bins, or a list of edges: [-1, 0, 0.05, 0.15] gives the
+    bands a caller chose, for example distances from a surface."""
+    return [float(edge) for edge in bins] if isinstance(bins, list) else int(bins)
+
+
+def _box_above(prim, values, shape, origin, threshold):
+    """The world box of the voxels over `threshold`: where the smoke is, not
+    where the grid is."""
+    array = numpy.asarray(values).reshape(shape[2], shape[1], shape[0])
+    found = numpy.argwhere(array > threshold)
+    if not len(found):
+        return None
+    corners = [prim.indexToPos(tuple(int(index + start) for index, start in
+                                     zip(corner[::-1], origin)))
+               for corner in (found.min(axis=0), found.max(axis=0))]
+    return {"min": [min(a, b) for a, b in zip(*corners)],
+            "max": [max(a, b) for a, b in zip(*corners)]}
 
 
 def stats(node_path, name=None, frame=None, bins=0, threshold=None):
@@ -138,9 +159,12 @@ def stats(node_path, name=None, frame=None, bins=0, threshold=None):
     found = []
     for prim in _named(geo, name):
         report = describe(prim, geo)
-        values, shape, _origin = read_voxels(prim)
+        values, shape, origin = read_voxels(prim)
         report["shape"] = shape
         report.update(_summary(values, bins, threshold))
+        if threshold is not None and origin is not None:
+            report["box_above_threshold"] = _box_above(prim, values, shape, origin,
+                                                       threshold)
         found.append(report)
     return {"path": node_path, "count": len(found), "volumes": found}
 
@@ -267,24 +291,28 @@ def _grid_places(prim, most=30000):
             for index_z in range(steps[2])]
 
 
-def compare_fields(node_path, name, against, frame=None, bands=10):
+def compare_fields(node_path, name, against, frame=None, bands=10, from_node=None):
     """How much of one field sits where another field is in each band.
 
     The one number that answers a collision question: "how much density is
     inside the collider", where the collider is a signed distance field.
+    `from_node` is the node that holds `against`, when that is another node:
+    the collider of a simulation is seldom in the same geometry as the smoke.
     """
     node, geo = geometry.resolve(node_path, frame)
     field = _named(geo, name)[0]
-    _named(geo, against)  # confirm the second field is there before the work
+    other = geometry.resolve(from_node, frame)[1] if from_node else geo
+    _named(other, against)  # confirm the second field is there before the work
 
     # Sample both fields on a grid in world space, over the box of the first
     # one. World space needs no voxel index, so a Volume and a VDB, which do
     # not agree on the index of a voxel, both work the same way.
-    read = _read_at(geo, [name, against], _points(_grid_places(field)))
-    here, there = read[name], read[against]
+    places = _points(_grid_places(field))
+    here = _read_at(geo, [name], places)[name]
+    there = _read_at(other, [against], places)[against]
     if not here.size:
         return {"path": node_path, "field": name, "against": against, "samples": 0}
-    counts, edges = numpy.histogram(there, bins=bands)
+    counts, edges = numpy.histogram(there, bins=_bins(bands))
     totals, _edges = numpy.histogram(there, bins=edges, weights=here)
     return {
         "path": node_path, "field": name, "against": against,
@@ -292,5 +320,5 @@ def compare_fields(node_path, name, against, frame=None, bands=10):
         "total_of_field": float(here.sum()),
         "bands": [{"from": float(edges[index]), "to": float(edges[index + 1]),
                    "samples": int(counts[index]), "total": float(totals[index])}
-                  for index in range(bands)],
+                  for index in range(len(counts))],
     }

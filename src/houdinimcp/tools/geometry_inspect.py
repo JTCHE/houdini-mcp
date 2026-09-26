@@ -98,7 +98,7 @@ def _one(path, mode, options, frame=None):
         if not want("name") or not want("against"):
             raise ValueError("mode 'volume_compare' needs name and against, two field names.")
         return volumes.compare_fields(path, want("name"), want("against"), frame,
-                                      want("bins", 10))
+                                      want("bins", 10), want("from_node"))
     if mode == "image":
         return {"info": cops.get_cop_info(path), "geometry": cops.get_cop_geometry(path),
                 "layer": cops.get_cop_layer(path, want("plane_name", "C"))}
