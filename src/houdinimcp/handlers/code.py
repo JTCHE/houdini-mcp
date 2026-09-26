@@ -46,13 +46,25 @@ class _Writes:
     `hou.OpNode.setParms`, and Houdini reports none of the writes that change
     nothing or change another node. While the script runs, these three calls
     go through a wrapper that keeps one line for each such write.
+
+    The creation script of a new node writes its own parameters. Those writes
+    are not the script's, so they are not reported.
     """
 
     def __enter__(self):
         self.notes = {}
-        self.saved = hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms
-        parm_set, tuple_set, set_parms = self.saved
+        self.creating = 0
+        self.saved = (hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms,
+                      hou.Node.createNode)
+        parm_set, tuple_set, set_parms, create_node = self.saved
         note = self.note
+
+        def watched_create_node(node, *rest, **named):
+            self.creating += 1
+            try:
+                return create_node(node, *rest, **named)
+            finally:
+                self.creating -= 1
 
         def watched_parm_set(parm, value, *rest, **named):
             target = parameters._referenced(parm)
@@ -79,11 +91,14 @@ class _Writes:
 
         hou.Parm.set, hou.ParmTuple.set = watched_parm_set, watched_tuple_set
         hou.OpNode.setParms = watched_set_parms
+        hou.Node.createNode = watched_create_node
         return self
 
     def note(self, parm, value, target):
         # ponytail: checks every write; a loop of many thousand writes pays for
         # it, so cache per parameter path if that shows up.
+        if self.creating:
+            return
         try:
             line = parameters.script_write_note(parm, value, target)
         except hou.Error:
@@ -94,7 +109,7 @@ class _Writes:
             self.notes.pop(parm.path(), None)
 
     def __exit__(self, *error):
-        hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms = self.saved
+        hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms, hou.Node.createNode =             self.saved
         return False
 
 
