@@ -48,7 +48,9 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                      (the current frame) at `step` (1). A step over 2 hides
                      movement and gives a warning: look at a short range at
                      step 1. `reference` is a picture to put first, to
-                     compare. `columns`, `tile_width` set the grid.
+                     compare. `columns`, `tile_width` set the grid. The
+                     frames cook in order, forward, and the result gives
+                     the cook seconds of each one.
         "movie"    — `node` over `frames` or `frame_range` (the playbar
                      range) as an MP4 at `fps`, `resolution` [width] wide.
                      Returns the path; open it in a player.

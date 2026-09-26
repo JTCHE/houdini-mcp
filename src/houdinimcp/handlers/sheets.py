@@ -10,6 +10,7 @@ frame on its own centres the subject every time, and all travel disappears.
 import math
 import os
 import subprocess
+import time
 
 import hou
 
@@ -22,10 +23,17 @@ def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
     node = hou.node(node_path)
     if node is None:
         raise ValueError(f"Node not found: {node_path}")
+    # Every frame in order, the first time: a simulation must step forward,
+    # and this pass is the one that measures the cook. The box holds the
+    # whole travel, so one camera that does not move sees every frame.
     box = hou.BoundingBox()
+    seconds = []
     with timing.keep_frame():
-        for frame in (wanted[0], wanted[len(wanted) // 2], wanted[-1]):
+        for frame in wanted:
             hou.setFrame(frame)
+            started = time.time()
+            node.geometry()
+            seconds.append({"frame": frame, "seconds": round(time.time() - started, 3)})
             box.enlargeToContain(offscreen._placed(node).boundingBox())
     if not box.isValid():
         raise ValueError(f"{node_path} cooked no geometry at frames {wanted[0]:g} to "
@@ -33,7 +41,7 @@ def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
     direction = offscreen._orbit_direction(azimuth, elevation) \
         if azimuth is not None or elevation is not None else "persp"
     view, _ = offscreen._aim(box, direction, fill=fill)
-    return offscreen.draw([node], view, wanted, size, **look)
+    return offscreen.draw([node], view, wanted, size, **look), seconds
 
 
 def _label(image, text):
@@ -63,8 +71,8 @@ def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
         tile.paste(picture, ((size[0] - picture.width) // 2, (size[1] - picture.height) // 2))
         _label(tile, "reference")
         tiles.append(tile)
-    for frame, path in zip(wanted, _render(node_path, wanted, size, azimuth, elevation,
-                                            fill, **look)):
+    drawn, seconds = _render(node_path, wanted, size, azimuth, elevation, fill, **look)
+    for frame, path in zip(wanted, drawn):
         tile = offscreen.over_grey(path, background)
         _label(tile, f"{frame:g}")
         tiles.append(tile)
@@ -76,7 +84,8 @@ def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
         board.paste(tile, ((index % columns) * size[0], (index // columns) * size[1]))
     output = os.path.abspath(output or viewport.new_file("mcp_sheet", ".png"))
     board.save(output)
-    report = {"filepath": output, "frames": wanted, "columns": columns, "tile": list(size)}
+    report = {"filepath": output, "frames": wanted, "columns": columns, "tile": list(size),
+              "cook_seconds": seconds}
     steps = [b - a for a, b in zip(wanted, wanted[1:])]
     if steps and max(steps) > SLOW_STEP:
         report["warning"] = (f"The step is {max(steps):g} frames. Past {SLOW_STEP}, each tile "
@@ -94,7 +103,7 @@ def movie(node_path, frames=None, fps=24, width=640, background=96, azimuth=None
     wanted = timing.frame_list(frames)
     # The encoder refuses an odd width or height.
     size = (int(width) // 2 * 2, int(width) * 3 // 4 // 2 * 2)
-    drawn = _render(node_path, wanted, size, azimuth, elevation, fill, **look)
+    drawn, seconds = _render(node_path, wanted, size, azimuth, elevation, fill, **look)
     folder = os.path.dirname(drawn[0])
     for index, (frame, path) in enumerate(zip(wanted, drawn)):
         tile = offscreen.over_grey(path, background)
@@ -108,7 +117,8 @@ def movie(node_path, frames=None, fps=24, width=640, background=96, azimuth=None
     if result.returncode != 0 or not os.path.isfile(output):
         raise RuntimeError(f"The encoder failed: {result.stderr.strip()[-600:]}")
     return {"filepath": output, "frames": len(wanted), "first": wanted[0],
-            "last": wanted[-1], "fps": fps, "size": list(size)}
+            "last": wanted[-1], "fps": fps, "size": list(size),
+            "cook_seconds": round(sum(entry["seconds"] for entry in seconds), 3)}
 
 
 def _encoder():
