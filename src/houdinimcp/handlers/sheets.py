@@ -38,9 +38,11 @@ def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
     if not box.isValid():
         raise ValueError(f"{node_path} cooked no geometry at frames {wanted[0]:g} to "
                          f"{wanted[-1]:g}.")
+    aim = {key: look.pop(key, None) for key in ("target", "look_from", "radius")}
+    named = look.pop("direction", None)
     direction = offscreen._orbit_direction(azimuth, elevation) \
-        if azimuth is not None or elevation is not None else "persp"
-    view, _ = offscreen._aim(box, direction, fill=fill)
+        if azimuth is not None or elevation is not None else (named or "persp")
+    view, _ = offscreen._aim(box, direction, fill=fill, **aim)
     return offscreen.draw([node], view, wanted, size, **look), seconds
 
 
