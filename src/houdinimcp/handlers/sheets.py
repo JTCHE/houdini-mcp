@@ -113,7 +113,8 @@ def movie(node_path, frames=None, fps=24, width=640, background=96, azimuth=None
     result = subprocess.run(
         [_encoder(), "-y", "-loglevel", "error", "-framerate", str(fps),
          "-i", os.path.join(folder, "movie.%05d.png"), "-c:v", "libopenh264",
-         "-pix_fmt", "yuv420p", output], capture_output=True, text=True)
+         "-pix_fmt", "yuv420p", output], capture_output=True, text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode != 0 or not os.path.isfile(output):
         raise RuntimeError(f"The encoder failed: {result.stderr.strip()[-600:]}")
     return {"filepath": output, "frames": len(wanted), "first": wanted[0],

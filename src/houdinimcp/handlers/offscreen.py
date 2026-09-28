@@ -168,7 +168,9 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
     hython = os.path.join(hou.getenv("HFS"), "bin", "hython.exe" if os.name == "nt" else "hython")
     result = subprocess.run([hython, os.path.join(os.path.dirname(__file__), "gl_child.py"),
                              os.path.join(folder, "job.json")],
-                            capture_output=True, text=True, timeout=600)
+                            capture_output=True, text=True, timeout=600,
+                            # Houdini has no console, so Windows gives hython a new one on top.
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     written = [hou.text.expandStringAtFrame(picture, index)
                for index in range(1, len(frames) + 1)]
     missing = [path for path in written if not os.path.isfile(path)]
