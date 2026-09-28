@@ -30,7 +30,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         shared = dict(node_path=node, background=background, azimuth=azimuth,
                       elevation=elevation, fill=fill, color_by=color_by,
                       color_range=color_range, contour=contour, slab=slab,
-                      vectors=vectors, output=output)
+                      vectors=vectors, output=output, direction=direction,
+                      target=target, look_from=look_from, radius=radius)
         if mode == "sheet":
             return sheets.sheet(frames=frames, start=start, step=step, count=count,
                                 columns=columns, tile_width=tile_width,
