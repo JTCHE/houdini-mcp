@@ -12,10 +12,10 @@ Three layers. Each runs in a different process.
    socket, `tools/` holds one module for each tool, and the tools call
    `handlers/`. `headless.py` runs the plugin in hython. Only this layer imports
    `hou`.
-3. **Documentation** — the `houdinimd-docs` wheel, the HoudiniMD engine built
+3. **Documentation** — the `houdinimd-docs` wheel, the NodebookMD engine built
    for Python. No Houdini running and no network needed: it reads the help out
    of the Houdini install on this machine and keeps an FTS5 index beside the
-   HoudiniMD app's own. `bridge/tools/docs.py` is the only caller.
+   NodebookMD app's own. `bridge/tools/docs.py` is the only caller.
 
 `src/houdinimcp/protocol.py` holds the port and the wire format. Both sides
 import it, so neither side can define its own port. A message is a 4-byte

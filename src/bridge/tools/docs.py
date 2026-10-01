@@ -203,7 +203,7 @@ def read(engine, reference, build):
 def normalize_page(reference: str) -> str:
     """Turn any reference to a documentation page into a page path.
 
-    Accepts a page path, a HoudiniMD or SideFX address, and a trailing .md or
+    Accepts a page path, a NodebookMD, HoudiniMD or SideFX address, and a trailing .md or
     .html: "https://www.sidefx.com/docs/houdini/nodes/sop/box.html" is
     "nodes/sop/box".
     """
@@ -380,7 +380,7 @@ if __name__ == "__main__":
     assert excerpt(page, section="beta") == "## Beta\n\nb\n"
     assert excerpt(page, section="gamma").startswith("Error: no section 'gamma'. Sections: Alpha; Beta")
     assert excerpt(page, part=3) == "Error: part must be 1 to 2."
-    # houdinimd.com writes a class page's headings as HTML, and an empty
+    # A class page can write its headings as HTML, and an empty
     # section is two headings in a row.
     html = ('# C\n\n<h2 id="m">Methods</h2>\n\n<h3 id="a">Memories</h3>\n'
             '<h3 id="q">Quick renders and <code>flipbooks</code></h3>\n\nflip\n\n<h3>Window</h3>\nw\n')
