@@ -37,6 +37,22 @@ uv tool install houdini-mcp-server && houdinimcp-install
 The installer adds the plugin to Houdini and the server to your AI clients of choice. Restart both.\
 pi also needs `pi install npm:pi-mcp-adapter`.
 
+**Claude plugin**
+
+This repository is also a Claude plugin, for Claude Code and for Cowork on your computer. It needs [uv](https://docs.astral.sh/uv/).
+The plugin starts a headless Houdini without setup. To connect the Houdini that you have open, ask Claude to run the `houdini-setup` skill.
+
+<details>
+<summary><b>What the plugin runs</b></summary>
+
+- `uv run --frozen` builds an environment from `uv.lock` in the plugin data folder, then starts the MCP server from this repository.
+- The server talks to Houdini on `localhost` only. It starts `hython`, or `houdini` on request, from your Houdini install, and `ffmpeg` to encode a flipbook movie.
+- `docs` reads the documentation out of your Houdini install with [houdinimd-docs](https://pypi.org/project/houdinimd-docs/). It sends nothing over the network.
+- `houdini-setup` writes the HoudiniMCP package into your Houdini preferences folder, after you approve it.
+- No tool sends data to a remote service. `execute` runs any Python that Claude writes in your Houdini session.
+
+</details>
+
 ## Tools
 
 | | |

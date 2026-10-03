@@ -1,6 +1,6 @@
 """Copy the plugin into a Houdini preferences directory and make Houdini load it.
 
-Houdini reads a copy, never this repo. See agents/deployment.md.
+Houdini reads a copy, never this repo. See guides/deployment.md.
 
 The copy is one Houdini package: `<prefs>/houdinimcp/` holds the module, the
 startup script and the shelf, and `<prefs>/packages/houdinimcp.json` puts that
