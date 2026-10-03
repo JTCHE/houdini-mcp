@@ -2,18 +2,18 @@
 
 Project information: @README.md
 
-**Read [Mission](agents/mission.md) first.** It says what this server is for and
+**Read [Mission](guides/mission.md) first.** It says what this server is for and
 what shape a change must take. Every other rule here serves it.
 
 ## Guides
 
-- [Mission](agents/mission.md) — few tools, many shapes; execute is the last resort.
-- [Issues](agents/issues.md) — where the specs live, and how to work from them.
-- [Architecture](agents/architecture.md) — the three layers, and which file owns what.
-- [Deployment](agents/deployment.md) — this repo is canonical; Houdini reads copies.
-- [Code](agents/code.md) — one source of truth, small modules, no legacy paths.
-- [Testing](agents/testing.md) — test the change in your own session, do not commit the test.
-- [Houdini API](agents/houdini-api.md) — the API is the authority, not your memory.
+- [Mission](guides/mission.md) — few tools, many shapes; execute is the last resort.
+- [Issues](guides/issues.md) — where the specs live, and how to work from them.
+- [Architecture](guides/architecture.md) — the three layers, and which file owns what.
+- [Deployment](guides/deployment.md) — this repo is canonical; Houdini reads copies.
+- [Code](guides/code.md) — one source of truth, small modules, no legacy paths.
+- [Testing](guides/testing.md) — test the change in your own session, do not commit the test.
+- [Houdini API](guides/houdini-api.md) — the API is the authority, not your memory.
 
 ## Rules
 
@@ -31,7 +31,7 @@ what shape a change must take. Every other rule here serves it.
   This includes help pages, images from the Houdini install, and test fixtures
   made from them. Make a fixture on the machine that runs the test.
 - Look at the change in a live Houdini before you report it done. Code that
-  imports is not a plugin that answers. See [Deployment](agents/deployment.md):
+  imports is not a plugin that answers. See [Deployment](guides/deployment.md):
   Houdini runs a copy, so run the installer and restart the plugin first. Start
   your own session; never work in the Houdini the user has open.
 - When a change answers a spec, append a dated line to it and set `Status: Closed`.

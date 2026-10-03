@@ -36,7 +36,7 @@ packages = ["src/houdinimcp", "src/bridge"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "houdini_mcp_server.py", "README.md",
-           "LICENSE", "AGENTS.md", "agents", "bootstrap.sh", "bootstrap.bat"]
+           "LICENSE", "AGENTS.md", "guides", "bootstrap.sh", "bootstrap.bat"]
 
 [project.scripts]
 houdinimcp-bridge = "bridge.cli:main"
