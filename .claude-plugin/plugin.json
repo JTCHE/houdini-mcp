@@ -7,6 +7,7 @@
   "homepage": "https://github.com/JTCHE/houdini-mcp",
   "repository": "https://github.com/JTCHE/houdini-mcp",
   "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": ["houdini", "sidefx", "vfx", "3d", "procedural"],
   "mcpServers": {
     "houdini": {
