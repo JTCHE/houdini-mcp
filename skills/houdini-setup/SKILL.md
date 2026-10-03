@@ -11,8 +11,7 @@ directory. This skill installs that plugin.
 
 1. Tell the user that the installer writes a Houdini package into the
    preferences directory of their newest Houdini, and get their approval.
-2. Run the installer from the plugin. Set `UV_PROJECT_ENVIRONMENT` to
-   `${CLAUDE_PLUGIN_DATA}/venv` for the command, then run:
+2. Run the installer from the plugin:
 
    ```
    uv run --frozen --project "${CLAUDE_PLUGIN_ROOT}" python -m bridge.onboarding.install --harness none --skip-deps --no-claude-permissions --yes --json

@@ -1,7 +1,7 @@
 {
   "name": "houdini-mcp",
   "displayName": "Houdini MCP",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Connect Claude to SideFX Houdini: read and edit the scene, cook, render, capture the viewport and read the offline documentation of your build.",
   "author": { "name": "John Chedeville", "url": "https://github.com/JTCHE" },
   "homepage": "https://github.com/JTCHE/houdini-mcp",
@@ -12,8 +12,7 @@
     "houdini": {
       "command": "uv",
       "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}",
-               "python", "${CLAUDE_PLUGIN_ROOT}/houdini_mcp_server.py"],
-      "env": { "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv" }
+               "python", "${CLAUDE_PLUGIN_ROOT}/houdini_mcp_server.py"]
     }
   }
 }
