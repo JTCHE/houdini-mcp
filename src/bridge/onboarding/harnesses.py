@@ -177,7 +177,9 @@ def _codex_configure(repo_dir: str, dry_run: bool) -> str:
     command = server_command(repo_dir)
     block = (
         f"[mcp_servers.{SERVER_NAME}]\n"
-        f'command = "{command["command"]}"\n'
+        # A JSON string is a TOML basic string, with the backslashes of a
+        # Windows path escaped.
+        f"command = {json.dumps(command['command'])}\n"
         f"args = {json.dumps(command['args'])}\n"
     )
     if not dry_run:
