@@ -48,8 +48,10 @@ def tool(query: str = None, page: str = None, node: str = None,
                 A loose name or a sidefx.com address also works. Returns the
                 text of the page.
         node  — a path to a node in the scene, for example
-                "/obj/geo1/attribwrangle1". Returns the page of that node type.
-                This is the only mode that needs Houdini.
+                "/obj/geo1/attribwrangle1", or a node type name, for example
+                "mountain". Returns the page of that node type. A path is the
+                only input that needs Houdini. With a type name, `category`
+                picks the context: "sop", "lop", "obj" and so on.
 
     category: keep the search inside one folder of pages, for example
     "nodes/sop", "vex/functions" or "hom/hou".
@@ -76,7 +78,10 @@ def tool(query: str = None, page: str = None, node: str = None,
     try:
         docs = reader()
         if query:
-            return json.dumps(search(docs, query, limit, category, build), indent=2)
+            return json.dumps(search(docs, query, limit, category, build), separators=(",", ":"))
+        if node and "/" not in node:
+            folder = (category or "").strip("/").removeprefix("nodes/")
+            return excerpt(read(docs, node, build, folder), section, part, always="Inputs")
         if node:
             meta = call("docs", {"node": node})
             type_name, node_category = meta.get("type_name", ""), meta.get("category", "")
@@ -178,19 +183,21 @@ def _best_of(engine, words, wanted, build):
     return sorted(found.values(), key=lambda hit: (hit["words"], hit["score"]), reverse=True)
 
 
-def read(engine, reference, build):
-    """The page as markdown. A reference with no path in it is a name, and the
-    best search hit for that name is the page."""
+# The node contexts in the order a bare name most likely means.
+NODE_FOLDERS = ("sop", "obj", "lop", "dop", "cop", "top", "chop", "vop", "out", "cop2")
+
+
+def read(engine, reference, build, folder=None):
+    """The page as markdown. A reference with no path in it is a name: the node
+    page of that name comes first, in `folder` when one is given, then the best
+    search hit. "mountain" is the node, not the shelf tool of that name."""
     path = normalize_page(reference)
     try:
         view = json.loads(engine.page(path, build))
     except ValueError:
         if "/" in path:
             raise
-        hits = json.loads(engine.search(reference, 1, build))
-        if not hits:
-            raise
-        view = json.loads(engine.page(hits[0]["path"], build))
+        view = json.loads(_page_of_name(engine, path, build, folder))
     head = [f"# {view['name']}"]
     if view.get("nodeType"):
         head.append(f"*{view['nodeType']}*")
@@ -198,6 +205,28 @@ def read(engine, reference, build):
         head.append(view["summary"])
     head.append(f"Page `{view['path']}`, Houdini {view['version']}.")
     return "\n\n".join(head) + "\n\n" + view["markdown"]
+
+
+def _page_of_name(engine, name, build, folder=None):
+    """The page JSON for a bare name."""
+    if name.startswith("hou."):
+        return engine.page(f"hom/hou/{name[4:]}", build)
+    for candidate in ((folder,) if folder else NODE_FOLDERS):
+        try:
+            return engine.page(f"nodes/{candidate}/{name}", build)
+        except ValueError:
+            continue
+    hits = json.loads(engine.search(name, 20, build))
+    if folder:
+        hits = [hit for hit in hits if hit["path"].startswith(f"nodes/{folder}/")]
+    if not hits:
+        raise ValueError(f"No page for '{name}'. Search for it with query.")
+    named = [hit for hit in hits if hit["path"].rsplit("/", 1)[-1] == name]
+    nodes = [hit for hit in named if hit["path"].startswith("nodes/")]
+    if folder and not named:
+        raise ValueError(f"No page 'nodes/{folder}/{name}'. Close pages: "
+                         f"{', '.join(hit['path'] for hit in hits[:5])}")
+    return engine.page((nodes or named or hits)[0]["path"], build)
 
 
 def normalize_page(reference: str) -> str:
