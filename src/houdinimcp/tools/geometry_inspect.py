@@ -54,7 +54,7 @@ def _one(path, mode, options, frame=None):
         return geometry.get_attrib_values(path, want("attrib_name"),
                                           want("attrib_class", "point"), frame,
                                           want("unique", False), want("start", 0),
-                                          want("limit", 1000))
+                                          want("limit", 20))
     if mode == "groups":
         return geometry.get_groups(path, want("group_type", "point"), frame)
     if mode == "group_members":
