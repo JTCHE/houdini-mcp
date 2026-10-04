@@ -40,7 +40,7 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "attrib"         — the values of `attrib_name` on `attrib_class`
                            ("point", "prim", "vertex", "detail"): min, max
                            and mean of each component over every element,
-                           and `limit` (20) values from `start`. A vector
+                           and `limit` (10) values from `start`. A vector
                            attribute keeps its shape. unique=True returns each
                            value that occurs and how many elements carry it,
                            which is how you find the pieces in a geometry.
