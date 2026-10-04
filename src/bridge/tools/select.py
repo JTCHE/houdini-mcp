@@ -18,10 +18,12 @@ def tool(paths: Union[str, List[str]] = None) -> str:
     """Read the node selection, or set it.
 
     Use it to see what the person works on before you change the scene, and to
-    put your own result in front of them when you are done.
-
-    A new selection replaces the one before it. Do not use it to find nodes:
+    show them your result when you are done. Do not use it to find nodes:
     scene_overview mode "search" does that.
+
+    A path is the full path of a node, for example "/obj/geo1/mountain1". A
+    path that is not a node stops the call with an error, and the selection
+    stays as it was.
 
     Returns JSON with the selected paths.
     """

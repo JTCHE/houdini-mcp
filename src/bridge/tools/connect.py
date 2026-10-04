@@ -11,7 +11,8 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
 PARAMS = {
     "mode": 'One of "connect", "disconnect", "reorder".',
     "items": 'A list of wires for "connect" or "disconnect", each a dictionary with the '
-             "keys of one wire. An argument outside items is the default for each one.",
+             'keys of one wire, for example {"src_path": "/obj/geo1/grid1", "dst_path": '
+             '"/obj/geo1/mountain1"}. An argument outside items is the default for each one.',
     "src_path": "connect: the node whose output feeds the wire.",
     "dst_path": "connect: the node whose input takes the wire.",
     "dst_input_index": "connect: the input of dst_path, from 0.",
@@ -39,8 +40,13 @@ def tool(mode: str = "connect",
     mode:
         "connect"    — src_path feeds dst_path. dst_input_index chooses the
                        input, src_output_index the output. Both count from 0.
+                       A wire into an input that has one replaces it.
         "disconnect" — path loses the wire on input_index.
         "reorder"    — path takes its inputs in the order input_indices.
+
+    For several wires, give `items`: for "connect", each item has src_path and
+    dst_path, and can have dst_input_index and src_output_index; for
+    "disconnect", each item has path, and can have input_index.
 
     Returns JSON, one line for each wire, with the paths that Houdini used.
     An input index that the node does not have is reported, not dropped.
