@@ -9,9 +9,10 @@ from mcp.types import ToolAnnotations
 
 from ..connection import call
 
-# The view, the flags and the playbar go back after the picture. Only a file
-# is written.
-ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+# The view, the flags and the playbar go back after the picture. Only the
+# picture file is written.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
+                              openWorldHint=False)
 
 PARAMS = {
     "mode": 'One of "viewport", "quad", "camera", "flipbook", "sheet", "movie".',
