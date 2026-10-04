@@ -1,6 +1,6 @@
 [project]
 name = "houdini-mcp-server"
-version = "0.6.1"  # Raise .claude-plugin/plugin.json to match. Users get no update until it changes.
+version = "0.7.0"  # Raise .claude-plugin/plugin.json to match. Users get no update until it changes.
 description = "Connect AI Agents to SideFX Houdini, with full documentation and screenshot support."
 readme = "README.md"
 requires-python = ">=3.10"
