@@ -15,7 +15,7 @@ def tool(mode: str = "create",
          take_name: str = None, input_path: str = None,
          code_file: str = None, replace: List[Dict[str, str]] = None,
          paths: List[str] = None, suffix: str = None,
-         names: Dict[str, str] = None) -> str:
+         names: Dict[str, str] = None, text: str = None) -> str:
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
@@ -29,7 +29,7 @@ def tool(mode: str = "create",
                              parameters, input_path. context selects the
                              network kind: "sop" (default), "cop", "chop",
                              "lop", "material_network".
-        "delete"           — path.
+        "delete"           — path, of a node, a sticky note or a network box.
         "copy"             — paths (or path), destination_path, suffix,
                              names. Copies a set of nodes with the wires
                              between them; a wire from outside the set goes to
@@ -62,6 +62,11 @@ def tool(mode: str = "create",
         "assign_material"  — path, material_path.
         "take"             — name to make a take, or take_name to select one.
         "current_network"  — path: what the network editor shows.
+        "note"             — parent_path, text, position, color: a sticky
+                             note. Without position it goes to the right of
+                             the nodes.
+        "box"              — paths, text, color: a network box around those
+                             nodes, with text as its comment.
 
     items: a list of items for a repeated action, each item a dictionary with
     the same keys. An argument given outside `items` is the default for every
@@ -84,6 +89,6 @@ def tool(mode: str = "create",
         ("material_type", material_type), ("material_path", material_path),
         ("take_name", take_name), ("input_path", input_path),
         ("code_file", code_file), ("replace", replace), ("paths", paths),
-        ("suffix", suffix), ("names", names),
+        ("suffix", suffix), ("names", names), ("text", text),
     ) if value is not None})
     return call_json("node_edit", arguments)
