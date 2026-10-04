@@ -59,7 +59,7 @@ def close_types(parent, node_type, count=5):
     bare = {}
     for full in names:
         bare.setdefault(hou.hda.componentsFromFullNodeTypeName(full)[2], []).append(full)
-    found = difflib.get_close_matches(node_type, list(bare), n=count, cutoff=0.6)
+    found = difflib.get_close_matches(node_type, list(bare), n=count, cutoff=0.7)
     return [full for name in found for full in bare[name]][:count]
 
 

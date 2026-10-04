@@ -29,6 +29,7 @@ def run(operations):
     if "error" in report:
         # The results name nodes that the roll back removed.
         report.pop("results")
+        report.pop("count")
         undone = _undo(label)
         report["rolled_back"] = (
             "Nothing changed: the batch undid the steps before the failure."
@@ -54,8 +55,11 @@ def _steps(operations, tools, label):
                     "error": f"{tool}: {type(error).__name__}: {error}"}
         failure = _failure(result)
         if failure:
-            return {"count": len(results), "results": results, "stopped_at": index,
-                    "error": f"{tool}: {failure}", "failed_result": result}
+            report = {"count": len(results), "results": results, "stopped_at": index,
+                      "error": f"{tool}: {failure}"}
+            if "error" not in result:
+                report["failed_result"] = result  # what else the step did
+            return report
         results.append({"tool": tool, "result": result})
     return {"count": len(results), "results": results}
 
