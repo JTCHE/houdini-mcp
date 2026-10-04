@@ -1,0 +1,34 @@
+name: release
+
+# Tag `v0.7.0` (the version in pyproject.toml) to publish to PyPI and to make
+# the GitHub release. Publishing reads PYPI_API_TOKEN from the repository
+# secrets. With no secret set, it uses PyPI trusted publishing.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Trusted publishing signs the upload with this job's identity.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Check that the tag is the package version
+        run: |
+          version=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          test "v$version" = "$GITHUB_REF_NAME"
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          # A file already uploaded by hand is not an error.
+          skip-existing: true
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME"
