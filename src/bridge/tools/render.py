@@ -36,7 +36,7 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
     failed: read the node with cook to see the error.
     """
     if mode == "watch":
-        return json.dumps(_watch(output_path), indent=2)
+        return json.dumps(_watch(output_path), separators=(",", ":"))
     return call_json("render", {"mode": mode, "path": path,
                                 "frame_range": frame_range,
                                 "render_type": render_type, "name": name,

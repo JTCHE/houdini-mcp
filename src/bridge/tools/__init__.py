@@ -5,6 +5,7 @@ A tool module holds:
                   name, its docstring is what the client reads.
     ANNOTATIONS   optional ToolAnnotations, for example destructiveHint.
 """
+import difflib
 import functools
 import importlib
 import inspect
@@ -14,6 +15,8 @@ from typing import Optional
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata
+from pydantic import ValidationError
+from pydantic_core import PydanticCustomError
 
 # name -> Tool, filled by build(). batch validates its steps against these.
 TOOLS = {}
@@ -43,6 +46,26 @@ class _Metadata(FuncMetadata):
     argument is not plain `str`, and then the text "null" becomes nothing and
     "true" a boolean: node_type "null" was lost. Text that reads as null or as
     a boolean stays text; a list or an object is still read."""
+
+    def validate_arguments(self, arguments):
+        """An argument that the tool does not take names the argument it is
+        close to: `path` where the tool takes `paths`."""
+        try:
+            return super().validate_arguments(arguments)
+        except ValidationError as error:
+            names = list(self.arg_model.model_fields)
+            details = []
+            for found in error.errors():
+                if found["type"] == "extra_forbidden":
+                    near = difflib.get_close_matches(str(found["loc"][0]), names, 1, 0.6)
+                    hint = f"Did you mean '{near[0]}'? " if near else ""
+                    found = {**found, "type": PydanticCustomError(
+                        "unknown_argument",
+                        f"This tool has no such argument. {hint}It takes: {', '.join(names)}.")}
+                found.pop("msg", None)
+                found.pop("url", None)
+                details.append(found)
+            raise ValidationError.from_exception_data(error.title, details) from error
 
     def pre_parse_json(self, data):
         parsed = super().pre_parse_json(data)

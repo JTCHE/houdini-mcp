@@ -52,7 +52,7 @@ def tool(action: str = "status", hip: str = None, port: int = None,
     """
     if action == "list":
         return json.dumps({"sessions": live_sessions(), "installed": installs()},
-                          indent=2, default=str)
+                          separators=(",", ":"), default=str)
 
     # The action runs before anything reads the connection: the connection is
     # what these actions repair, so a broken one must not block them.
@@ -90,4 +90,4 @@ def tool(action: str = "status", hip: str = None, port: int = None,
         report["houdini"] = houdini
     elif "problem" not in report:
         report["next_action"] = start_hint()
-    return json.dumps(report, indent=2, default=str)
+    return json.dumps(report, separators=(",", ":"), default=str)

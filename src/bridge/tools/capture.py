@@ -148,7 +148,7 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         for path in _paths(result):
             contents.append(_picture(path, result))
     return [item for item in contents if item is not None] + \
-           [json.dumps(result, indent=2, default=str)]
+           [json.dumps(result, separators=(",", ":"), default=str)]
 
 
 def _count(frames) -> int:
