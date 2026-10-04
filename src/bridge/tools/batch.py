@@ -29,15 +29,14 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
     Do not use it when a later step needs to read what an earlier step made.
     The list runs without you in the middle, so nothing can branch on a result.
 
-    Every step is checked before any step runs: a step with a wrong argument
-    stops the batch with its index and its error, and nothing changes.
+    A failed batch changes nothing. Every step is checked before any step
+    runs, and a step with a wrong argument stops the batch. A step that fails
+    as it runs stops the list, and the steps before it are undone. A step whose
+    item failed is a failed step, and so is a parameter write that did not
+    apply. The error names the index of the step and its error.
 
     Returns JSON with one result for each operation, in the order of the
-    operations, and the picture of every
-    capture step. The list stops at the first failure, and the steps before it
-    are undone, so a failed batch changes nothing: the report names the index
-    that failed and the error. A step whose item failed is a failed step, and
-    so is a parameter write that did not apply.
+    operations, and the picture of every capture step.
 
     A batch that works cooks the display node of each SOP network that it
     touched: `check` gives its point and primitive counts, and the touched
