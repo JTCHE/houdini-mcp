@@ -1,7 +1,7 @@
 {
   "name": "houdini-mcp",
   "displayName": "Houdini MCP",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Connect Claude to SideFX Houdini: read and edit the scene, cook, render, capture the viewport and read the offline documentation of your build.",
   "author": { "name": "John Chedeville", "url": "https://github.com/JTCHE" },
   "homepage": "https://github.com/JTCHE/houdini-mcp",

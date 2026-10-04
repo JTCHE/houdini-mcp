@@ -1,5 +1,7 @@
 # Houdini MCP
 
+<!-- mcp-name: io.github.JTCHE/houdini-mcp -->
+
 <img src="https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/public/cover.png" alt="An illustration titled &quot;Houdini MCP&quot;, showing three agent platforms linked to the NodebookMD icon" />
 
 
