@@ -32,6 +32,10 @@ def tool(mode: str = "connect",
     Use it after node_edit made the nodes. A list of wires goes in one undo
     group and one round trip.
 
+    Do not use it to wire a node that you make now: node_edit mode "create"
+    takes `input_path` and wires it in the same call. Do not use it to read the
+    wires: scene_overview mode "network" lists them.
+
     mode:
         "connect"    — src_path feeds dst_path. dst_input_index chooses the
                        input, src_output_index the output. Both count from 0.

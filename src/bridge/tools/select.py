@@ -20,6 +20,9 @@ def tool(paths: Union[str, List[str]] = None) -> str:
     Use it to see what the person works on before you change the scene, and to
     put your own result in front of them when you are done.
 
+    A new selection replaces the one before it. Do not use it to find nodes:
+    scene_overview mode "search" does that.
+
     Returns JSON with the selected paths.
     """
     return call_json("select", {"paths": paths})

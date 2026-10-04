@@ -20,7 +20,8 @@ def tool(path: str, mode: str = "status", state: str = None,
     """Cook a TOP network, and read what its work items did.
 
     Use it for a TOP network only. A TOP node does not cook like a SOP: it
-    makes work items, and each item runs on its own.
+    makes work items, and each item runs on its own. For a SOP or a DOP, use
+    cook. For a ROP, use render.
 
     mode:
         "status"    — the counts for each state, and whether a cook runs now.

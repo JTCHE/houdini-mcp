@@ -28,6 +28,10 @@ def tool(limit: int = 100, severity: str = None, source: str = None,
     hides behind an empty result: the geometry has no points, and the reason is
     here.
 
+    Do not use it for the errors of nodes that you cook now: cook returns them,
+    with the nodes upstream that failed. scene_overview mode "errors" lists every
+    node with a cook error, without the log.
+
     Each call takes the log entries away, so a call returns only what is new
     since the call before it.
 

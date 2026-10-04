@@ -22,6 +22,12 @@ def tool(mode: str = "get", frame: float = None, start: float = None,
     Use it before you read geometry that changes over time: a SOP cooks at the
     current frame, so the frame decides what you see.
 
+    Do not use it only to read another frame: geometry_inspect, node_inspect
+    and stage_inspect take `frames` and put the playbar back after. A frame
+    that you set here stays for the person and for every later call, and
+    "range" also changes what a flipbook covers, and a ROP whose range
+    follows $FSTART and $FEND.
+
     mode:
         "get"      — the current frame and time.
         "frame"    — go to `frame`.

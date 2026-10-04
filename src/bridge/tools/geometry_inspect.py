@@ -5,8 +5,9 @@ from mcp.types import ToolAnnotations
 
 from ..connection import call_json
 
-# Only "export" writes, and only the file at `output`.
-ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+# The scene does not change. Only "export" writes, and only the file at `output`.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
+                              openWorldHint=False)
 
 PARAMS = {
     "path": "The SOP or COP node to read, or a list. A list keeps going after a node that "
@@ -128,7 +129,8 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "volume"         — the VDB grids in a COP node.
         "export"         — write the geometry to disk. `format` is "obj",
                            "bgeo" or another that Houdini writes, and `output`
-                           is the file path.
+                           is the file path. A file that is there is
+                           overwritten. The other modes write nothing.
 
     Returns JSON. A large read is slow: keep `count` small and page with
     `start`.
