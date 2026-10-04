@@ -1,4 +1,4 @@
-"""batch — several tool calls in one round trip and one undo group."""
+"""batch — several tool calls in one round trip, all or nothing."""
 import json
 from typing import Any, Dict, List
 
@@ -27,9 +27,14 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
     stops the batch with its index and its error, and nothing changes.
 
     Returns JSON with one result for each operation, and the picture of every
-    capture step. The list stops at the first failure, because a later step
-    usually needs the node that an earlier step made: the report names the
-    index that failed and the error, and the steps before it stay.
+    capture step. The list stops at the first failure, and the steps before it
+    are undone, so a failed batch changes nothing: the report names the index
+    that failed and the error. A step whose item failed is a failed step, and
+    so is a parameter write that did not apply.
+
+    A batch that works cooks the display node of each SOP network that it
+    touched: `check` gives its point and primitive counts, and the touched
+    nodes that have errors. Read it before you build on the result.
 
     A capture step with no `output` writes to a file of its own, so one batch
     can hold several captures.
@@ -51,6 +56,9 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
         steps.append({"tool": name, "params": params})
 
     report = call("batch", {"operations": steps}, timeout=600.0)
+    if "error" in report:
+        report["_session"] = session_line()
+        raise ToolError(json.dumps(report, separators=(",", ":"), default=str))
     pictures = []
     for step in report.get("results", []):
         result = step.get("result")
@@ -61,4 +69,4 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
             if picture is not None:
                 pictures.append(picture)
     report["_session"] = session_line()
-    return pictures + [json.dumps(report, indent=2, default=str)]
+    return pictures + [json.dumps(report, separators=(",", ":"), default=str)]

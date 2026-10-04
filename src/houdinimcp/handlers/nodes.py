@@ -1,4 +1,5 @@
 """Node CRUD, wiring, flags, layout, and material handlers."""
+import difflib
 import re
 
 import hou
@@ -18,10 +19,13 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
     try:
         node = parent.createNode(node_type, node_name=name)
     except hou.OperationFailed as error:
-        raise ValueError(f"Houdini has no node type '{node_type}' in {parent_path}: {error}. "
-                         f"Read the type name with scene_overview mode 'node_types'.") from error
+        close = close_types(parent, node_type)
+        hint = (f"Did you mean: {', '.join(close)}?" if close else
+                "Read the type names with scene_overview mode 'node_types'.")
+        raise ValueError(f"Houdini has no node type '{node_type}' in {parent_path}. "
+                         f"{hint}") from error
 
-    report = {"name": node.name(), "path": node.path(), "type": node.type().name()}
+    report = {"path": node.path(), "type": node.type().name()}
     if name and node.name() != name:
         report["renamed_by_houdini"] = (f"The name '{name}' was in use. Use the path in this "
                                         f"result from now on.")
@@ -35,7 +39,6 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
         node.setPosition([position[0], position[1]])
     else:
         report.update(place_node(node))
-    report["position"] = list(node.position())
     if parameters:
         # The same write path as parm_set, so a write that does nothing is
         # reported here too instead of passing for success.
@@ -44,6 +47,20 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
         if written["not_applied"]:
             report["not_applied"] = written["not_applied"]
     return report
+
+
+def close_types(parent, node_type, count=5):
+    """The node types under `parent` whose names are close to `node_type`.
+
+    A name compares without its namespace and version, so "mountian" finds
+    "mountain::2.0" as well as "mountain".
+    """
+    names = parent.childTypeCategory().nodeTypes()
+    bare = {}
+    for full in names:
+        bare.setdefault(hou.hda.componentsFromFullNodeTypeName(full)[2], []).append(full)
+    found = difflib.get_close_matches(node_type, list(bare), n=count, cutoff=0.7)
+    return [full for name in found for full in bare[name]][:count]
 
 
 def modify_node(path, parameters=None, position=None, name=None):
@@ -75,8 +92,8 @@ def modify_node(path, parameters=None, position=None, name=None):
 
 
 def delete_node(path):
-    """Deletes a node from the scene."""
-    node = hou.node(path)
+    """Delete a node, a sticky note or a network box."""
+    node = hou.node(path) or hou.item(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
     node_path = node.path()
@@ -347,6 +364,52 @@ def place_node(node):
     layout.place([node])
     faults = layout.problems(node.parent(), [node])
     return {"layout_problems": faults} if faults else {}
+
+
+def create_note(parent_path, text, name=None, position=None, color=None):
+    """A sticky note: the text that tells a person what a part of a network does."""
+    parent = _network(parent_path)
+    note = parent.createStickyNote(name)
+    note.setText(text)
+    # A note sized to its text, about 0.1 network units for each character.
+    lines = text.splitlines() or [""]
+    width = max(2.0, 0.1 * max(map(len, lines)))
+    note.setSize(hou.Vector2(width, max(1.0, 0.25 * len(lines) + 0.5)))
+    if position:
+        note.setPosition(hou.Vector2(position[0], position[1]))
+    else:
+        children = parent.children()
+        if children:
+            right = max(child.position()[0] + child.size()[0] for child in children)
+            top = max(child.position()[1] for child in children)
+            note.setPosition(hou.Vector2(right + 1, top))
+    if color:
+        note.setColor(hou.Color(*color))
+    return {"path": note.path(), "type": "sticky note"}
+
+
+def create_box(parent_path, paths, text=None, name=None, color=None):
+    """A network box around `paths`, with `text` as its comment."""
+    parent = _network(parent_path)
+    box = parent.createNetworkBox(name)
+    for path in paths:
+        item = hou.node(path) or hou.item(path)
+        if item is None:
+            raise ValueError(f"Not found: {path}")
+        box.addItem(item)
+    if text:
+        box.setComment(text)
+    box.fitAroundContents()
+    if color:
+        box.setColor(hou.Color(*color))
+    return {"path": box.path(), "type": "network box", "holds": len(paths)}
+
+
+def _network(path):
+    parent = hou.node(path)
+    if not parent:
+        raise ValueError(f"Network not found: {path}")
+    return parent
 
 
 def set_node_color(node_path, color):

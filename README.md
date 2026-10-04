@@ -67,6 +67,10 @@ The plugin starts a headless Houdini without setup. To connect the Houdini that 
 
 No Houdini open? The server starts a headless `hython`.
 
+`batch` builds a whole network in one call, and it is all or nothing: a failed
+step undoes the steps before it. A build that works comes back with the cooked
+point and primitive counts, and the nodes with errors.
+
 > **Warning:** `execute` runs any Python in Houdini. Save your work.
 
 <details>
@@ -92,6 +96,7 @@ houdinimcp-install --list          # Houdini installs and clients found, as JSON
 houdinimcp-install --yes --json    # newest Houdini, every client found; JSON report
 houdinimcp-install --houdini-version 22.0 --harness claude-code --yes
 houdinimcp-install --dry-run --yes # change nothing
+houdinimcp-install --uninstall     # remove the plugin and every client entry
 ```
 
 Flags: `--houdini-version none` skips the plugin, `--prefs-dir PATH` names the

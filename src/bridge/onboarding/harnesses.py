@@ -80,6 +80,26 @@ def _write_json_server(path: str, repo_dir: str, dry_run: bool, key: str = "mcpS
     return path
 
 
+def _drop_json_server(path: str, dry_run: bool, key: str = "mcpServers") -> str:
+    """Remove the server from a JSON config, keeping everything else in it.
+    Returns the path, or None when the config does not hold the server."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        try:
+            config = json.load(handle)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{path} is not valid JSON: {error}")
+    if SERVER_NAME not in config.get(key, {}):
+        return None
+    del config[key][SERVER_NAME]
+    if not dry_run:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+    return path
+
+
 # ── Claude Code ──
 
 def _claude_code_detect() -> bool:
@@ -102,6 +122,16 @@ def _claude_code_configure(repo_dir: str, dry_run: bool) -> str:
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "claude mcp add failed")
     return "claude mcp list"
+
+
+def _claude_code_remove(dry_run: bool) -> str:
+    if not shutil.which("claude"):
+        return _drop_json_server(_home(".claude.json"), dry_run)
+    if dry_run:
+        return "claude mcp remove --scope user"
+    result = subprocess.run(["claude", "mcp", "remove", "--scope", "user", SERVER_NAME],
+                            capture_output=True, text=True, check=False)
+    return "claude mcp remove --scope user" if result.returncode == 0 else None
 
 
 # ── Claude Desktop ──
@@ -143,10 +173,7 @@ def _codex_configure(repo_dir: str, dry_run: bool) -> str:
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-    # Drop any previous block for this server, up to the next table header.
-    text = re.sub(
-        rf"(?ms)^\[mcp_servers\.{SERVER_NAME}\].*?(?=^\[|\Z)", "", text
-    ).rstrip()
+    text = _without_codex_block(text)
     command = server_command(repo_dir)
     block = (
         f"[mcp_servers.{SERVER_NAME}]\n"
@@ -157,6 +184,26 @@ def _codex_configure(repo_dir: str, dry_run: bool) -> str:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(f"{text}\n\n{block}" if text else block)
+    return path
+
+
+def _without_codex_block(text: str) -> str:
+    """The config without the block of this server, up to the next table header."""
+    return re.sub(rf"(?ms)^\[mcp_servers\.{SERVER_NAME}\].*?(?=^\[|\Z)", "", text).rstrip()
+
+
+def _codex_remove(dry_run: bool) -> str:
+    path = _home(".codex", "config.toml")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    left = _without_codex_block(text)
+    if left == text.rstrip():
+        return None
+    if not dry_run:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(left + "\n" if left else "")
     return path
 
 
@@ -190,12 +237,16 @@ def _opencode_detect() -> bool:
     return bool(shutil.which("opencode")) or os.path.isdir(_opencode_dir())
 
 
-def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
+def _opencode_config() -> str:
     # The global config has three accepted names. Use the one that exists.
     names = ("opencode.json", "opencode.jsonc", "config.json")
-    path = next((os.path.join(_opencode_dir(), name) for name in names
+    return next((os.path.join(_opencode_dir(), name) for name in names
                  if os.path.isfile(os.path.join(_opencode_dir(), name))),
                 os.path.join(_opencode_dir(), names[0]))
+
+
+def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
+    path = _opencode_config()
     config = {}
     if os.path.isfile(path):
         try:
@@ -236,11 +287,12 @@ def _pi_configure(repo_dir: str, dry_run: bool) -> str:
 
 
 class Harness:
-    def __init__(self, key, label, detect, configure):
+    def __init__(self, key, label, detect, configure, remove):
         self.key = key
         self.label = label
         self.detect = detect
         self.configure = configure
+        self.remove = remove
 
     @property
     def installed(self) -> bool:
@@ -248,13 +300,19 @@ class Harness:
 
 
 HARNESSES = [
-    Harness("claude-code", "Claude Code (CLI)", _claude_code_detect, _claude_code_configure),
-    Harness("claude-desktop", "Claude Desktop", _claude_desktop_detect, _claude_desktop_configure),
-    Harness("codex", "OpenAI Codex", _codex_detect, _codex_configure),
-    Harness("gemini-cli", "Gemini CLI", _gemini_detect, _gemini_configure),
-    Harness("cursor", "Cursor", _cursor_detect, _cursor_configure),
-    Harness("opencode", "opencode", _opencode_detect, _opencode_configure),
-    Harness("pi", "pi", _pi_detect, _pi_configure),
+    Harness("claude-code", "Claude Code (CLI)", _claude_code_detect, _claude_code_configure,
+            _claude_code_remove),
+    Harness("claude-desktop", "Claude Desktop", _claude_desktop_detect, _claude_desktop_configure,
+            lambda dry_run: _drop_json_server(_claude_desktop_config(), dry_run)),
+    Harness("codex", "OpenAI Codex", _codex_detect, _codex_configure, _codex_remove),
+    Harness("gemini-cli", "Gemini CLI", _gemini_detect, _gemini_configure,
+            lambda dry_run: _drop_json_server(_home(".gemini", "settings.json"), dry_run)),
+    Harness("cursor", "Cursor", _cursor_detect, _cursor_configure,
+            lambda dry_run: _drop_json_server(_home(".cursor", "mcp.json"), dry_run)),
+    Harness("opencode", "opencode", _opencode_detect, _opencode_configure,
+            lambda dry_run: _drop_json_server(_opencode_config(), dry_run, key="mcp")),
+    Harness("pi", "pi", _pi_detect, _pi_configure,
+            lambda dry_run: _drop_json_server(os.path.join(_pi_dir(), "mcp.json"), dry_run)),
 ]
 
 BY_KEY = {harness.key: harness for harness in HARNESSES}

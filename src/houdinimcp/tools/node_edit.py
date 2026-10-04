@@ -9,7 +9,7 @@ from ..handlers import chops, cops, lop, materials, nodes, takes, vex, viewport
 MUTATES = True
 
 MODES = ("create", "delete", "copy", "move", "rename", "flags", "color", "layout",
-         "wrangle", "material", "assign_material", "take", "current_network")
+         "wrangle", "material", "assign_material", "take", "current_network", "note", "box")
 
 
 def run(items=None, mode="create", **defaults):
@@ -87,4 +87,12 @@ def _one(mode, item):
         return takes.set_current_take(item["take_name"])
     if mode == "current_network":
         return viewport.set_current_network(item["path"])
+    if mode == "note":
+        return nodes.create_note(item["parent_path"], item["text"], item.get("name"),
+                                 item.get("position"), item.get("color"))
+    if mode == "box":
+        paths = item["paths"]
+        parent = item.get("parent_path") or paths[0].rsplit("/", 1)[0]
+        return nodes.create_box(parent, paths, item.get("text"), item.get("name"),
+                                item.get("color"))
     raise unknown_mode(mode, MODES)

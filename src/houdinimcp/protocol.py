@@ -17,6 +17,11 @@ import sys
 # WSL, and a bind in such a block fails with WinError 10013.
 FORCED_PORT = int(os.environ["HOUDINIMCP_PORT"]) if os.environ.get("HOUDINIMCP_PORT") else None
 
+# The IPv4 loopback address, not "localhost". On Windows a connect to
+# "localhost" tries ::1 first, and that refusal costs about a second for each
+# connect: a headless start made eight of them.
+HOST = "127.0.0.1"
+
 
 def data_dir() -> str:
     """The folder where HoudiniMCP keeps what outlives one call.

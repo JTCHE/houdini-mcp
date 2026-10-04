@@ -172,13 +172,14 @@ def get_prims(node_path, start=0, count=100, attribs=None, frame=None):
 
 
 def get_attrib_values(node_path, attrib_name, attrib_class="point", frame=None,
-                      unique=False, start=0, count=1000):
+                      unique=False, start=0, count=20):
     """The values of one attribute.
 
     `unique` returns each value that occurs and how many elements carry it,
-    which is the answer to "what pieces are in this geometry". Without it the
-    values come back one for each element, from `start`, at most `count` of
-    them: a full read of a large mesh is too big for a client to hold.
+    which is the answer to "what pieces are in this geometry". Without it a
+    numeric attribute comes back as its stats over every element, and at most
+    `count` values from `start`: a full read of a large mesh is too big for a
+    client to hold.
     """
     node, geo = resolve(node_path, frame)
     if attrib_class == "detail":
@@ -220,12 +221,24 @@ def get_attrib_values(node_path, attrib_name, attrib_class="point", frame=None,
         report["unique_count"] = len(counts)
         report["unique"] = [{"value": value, "elements": number} for value, number in ordered]
         return report
+    if values and "String" not in data_type:
+        report["stats"] = _stats(values, size)
     window = values[start:start + count]
     report.update({"start": start, "returned": len(window), "values": window})
     if start + len(window) < len(values):
         report["more"] = (f"{len(values) - start - len(window)} more elements. Read them "
-                          f"with start={start + len(window)}, or ask for unique=true.")
+                          f"with start={start + len(window)} and a larger limit, or ask "
+                          f"for unique=true.")
     return report
+
+
+def _stats(values, size):
+    """Min, max and mean of each component, so that a read of a large mesh
+    needs no list of values to say what the attribute holds."""
+    columns = [values] if size == 1 else list(zip(*values))
+    stats = [{"min": min(column), "max": max(column),
+              "mean": round(sum(column) / len(column), 6)} for column in columns]
+    return stats[0] if size == 1 else stats
 
 
 def get_skeleton(node_path, frame=None, pattern=None):

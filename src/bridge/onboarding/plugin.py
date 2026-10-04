@@ -65,6 +65,18 @@ def install(prefs_dir: str, python_libs: str, dry_run: bool = False) -> dict:
     return {"prefs_dir": prefs_dir, "plugin_dir": module_dest, "wrote": log}
 
 
+def uninstall(prefs_dir: str, dry_run: bool = False) -> list:
+    """Remove the package that `install` wrote. Returns the paths it removed."""
+    package_dir = os.path.join(prefs_dir, PACKAGE_NAME)
+    package_file = os.path.join(prefs_dir, "packages", f"{PACKAGE_NAME}.json")
+    removed = [path for path in (package_file, package_dir) if os.path.exists(path)]
+    if not dry_run:
+        if os.path.isfile(package_file):
+            os.remove(package_file)
+        shutil.rmtree(package_dir, ignore_errors=True)
+    return removed
+
+
 QUIET_START = "HOUDINI_NO_START_PAGE_SPLASH"
 
 

@@ -106,7 +106,7 @@ def _start_job(params, budget):
                        "port": record.get("port"), "timeout": budget,
                        "next": f"Read it with execute mode='job' job='{number}'. Other "
                                f"calls wait until it ends; session action='interrupt' "
-                               f"stops it."}, indent=2)
+                               f"stops it."}, separators=(",", ":"))
 
 
 def _job_report(job):
@@ -122,7 +122,7 @@ def _job_report(job):
     else:
         report["seconds"] = record.get("seconds")
         report.update({key: record[key] for key in ("result", "error") if key in record})
-    return json.dumps(report, indent=2, default=str)
+    return json.dumps(report, separators=(",", ":"), default=str)
 
 
 def _tail(port, most=4000):

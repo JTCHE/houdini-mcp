@@ -27,13 +27,17 @@ The tools
   docs             the official Houdini documentation
   playbar          the current frame, the frame range, playback
   render           ROP nodes: make one, start it, follow the work
-  scene_file       the .hip file on disk
+  scene_file       the .hip file on disk; undo and redo
   select           which nodes are selected
   hda              digital assets: what is installed, what is inside one
   stage_inspect    the USD stage that a LOP node makes
   pdg              TOP networks and their work items
-  batch            several calls in one round trip and one undo group
+  batch            several calls in one round trip, all or nothing
   execute          run code in the session. Last resort.
+
+The loop: read the node page with docs, build with one batch, read its `check`
+(the cooked counts and the nodes with errors), then look with capture. A failed
+batch changes nothing, so fix the step it names and send the batch again.
 
 Houdini fails without an error more often than it fails with one. These facts
 cause most wrong results.

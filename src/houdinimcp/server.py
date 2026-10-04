@@ -31,7 +31,7 @@ def identity() -> dict:
 
 
 class HoudiniMCPServer:
-    def __init__(self, host='localhost', port=None):
+    def __init__(self, host=protocol.HOST, port=None):
         self.host = host
         # 0 tells the operating system to pick a free port. See protocol.PORT_FILE.
         self.port = port if port is not None else (protocol.FORCED_PORT or 0)
