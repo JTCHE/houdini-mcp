@@ -6,8 +6,8 @@ from ..connection import call_json
 ANNOTATIONS = ToolAnnotations(destructiveHint=True)
 
 
-def tool(mode: str = "info", path: str = None) -> str:
-    """Read, save or load the scene file.
+def tool(mode: str = "info", path: str = None, count: int = 1) -> str:
+    """Read, save or load the scene file, or step its undo history.
 
     Use "save" before a change that is hard to undo, and use "info" to learn
     whether the session holds work that is not saved.
@@ -18,7 +18,12 @@ def tool(mode: str = "info", path: str = None) -> str:
         "save" — save to `path`, or over the open file when `path` is empty.
         "load" — open the .hip file at `path`. Everything in the session goes
                  away, and the undo history with it.
+        "undo" — undo `count` steps. Each call of a tool that changes the
+                 scene is one step. A batch is one step, except a batch with a
+                 step that waits (capture, render): there each step is one.
+                 Returns the labels it undid and the next ones.
+        "redo" — redo `count` steps.
 
     Returns JSON.
     """
-    return call_json("scene_file", {"mode": mode, "path": path}, timeout=300.0)
+    return call_json("scene_file", {"mode": mode, "path": path, "count": count}, timeout=300.0)
