@@ -57,6 +57,9 @@ def parse_args():
                         help="Pre-approve the Houdini tools in Claude Code")
     parser.add_argument("--no-claude-permissions", dest="claude_permissions", action="store_false",
                         help="Leave Claude Code permissions alone")
+    parser.add_argument("--uninstall", action="store_true",
+                        help="Remove the plugin from every Houdini preferences directory, and "
+                             "the server from every client (or from each --harness)")
     parser.add_argument("--skip-deps", action="store_true", help="Do not run 'uv sync'")
     parser.add_argument("--yes", "-y", action="store_true", help="Take every default, ask nothing")
     parser.add_argument("--dry-run", action="store_true", help="Report what would change, change nothing")
@@ -148,6 +151,9 @@ def main():
     if args.json:
         # stdout carries the JSON report and nothing else.
         tui.stream = sys.stderr
+
+    if args.uninstall:
+        return uninstall(args, installs)
 
     asking = tui.interactive() and not args.yes
     summary = {"repo_dir": REPO_DIR, "dry_run": args.dry_run,
@@ -246,6 +252,39 @@ def main():
     if summary["errors"]:
         for error in summary["errors"]:
             tui.fail(error)
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    return 1 if summary["errors"] else 0
+
+
+def uninstall(args, installs):
+    """Undo what main writes. The Claude Code permissions stay: without the
+    server they allow nothing."""
+    summary = {"dry_run": args.dry_run, "removed": [], "errors": []}
+    tui.title("=== HoudiniMCP uninstall ===")
+    verb = "Would remove" if args.dry_run else "Removed"
+    prefs_dirs = {install.prefs_dir for install in installs}
+    if args.prefs_dir:
+        prefs_dirs.add(args.prefs_dir)
+    for prefs_dir in sorted(prefs_dirs):
+        for path in plugin.uninstall(prefs_dir, args.dry_run):
+            summary["removed"].append(path)
+            tui.ok(f"{verb} {path}")
+    keys = [key for key in args.harness if key not in ("all", "none")]
+    chosen = ([harnesses.BY_KEY[key] for key in keys] if keys else
+              [] if "none" in args.harness else harnesses.HARNESSES)
+    for harness in chosen:
+        try:
+            target = harness.remove(args.dry_run)
+        except (OSError, RuntimeError) as error:
+            summary["errors"].append(f"{harness.key}: {error}")
+            tui.fail(f"{harness.label}: {error}")
+            continue
+        if target:
+            summary["removed"].append(f"{harness.key}: {target}")
+            tui.ok(f"{harness.label}: {verb.lower()} from {target}")
+    if not summary["removed"]:
+        tui.say("  Nothing to remove.")
     if args.json:
         print(json.dumps(summary, indent=2))
     return 1 if summary["errors"] else 0
