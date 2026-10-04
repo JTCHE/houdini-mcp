@@ -1,9 +1,26 @@
 """session — which Houdini answers, and start, choose, stop or interrupt one."""
 import json
 
+from mcp.types import ToolAnnotations
+
 from ..connection import (HoudiniError, attach, call, detach, installs, interrupt,
                           live_sessions, start_gui, start_headless, start_hint, status,
                           stop_headless)
+
+
+# stop and interrupt end work in a Houdini process.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "action": 'One of "status", "list", "attach", "detach", "interrupt", "start", '
+              '"start_gui", "stop".',
+    "hip": "start_gui: the .hip file to open.",
+    "port": "attach: the port of the Houdini to talk to, from list. interrupt: the "
+            "Houdini to interrupt, when not the attached one.",
+    "version": 'start and start_gui: the Houdini release, for example "21.0" or '
+               '"21.0.829".',
+}
 
 
 def tool(action: str = "status", hip: str = None, port: int = None,

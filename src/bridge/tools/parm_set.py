@@ -1,7 +1,44 @@
 """parm_set — write parameters, press buttons, write expressions and keyframes."""
 from typing import Any, Dict, List, Optional, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+# A write replaces the value that was there. One undo takes it back.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "value", "press", "expression", "keyframe", "keyframes", '
+            '"delete_keyframe", "revert", "lock", "link", "spare", "render_settings", '
+            '"chop_export", "snapshot", "restore", "diff".',
+    "items": "A list of writes, each a dictionary with the keys of one call. An argument "
+             "outside items is the default for each one.",
+    "path": "The node that holds the parameter.",
+    "parm": 'The parameter name, for example "tx" or "divsize".',
+    "value": "value, keyframe: the value to write. A menu takes its token.",
+    "parameters": "value: several names and values in one write, as a dictionary. spare: "
+                  "the list of controls to add.",
+    "expression": "expression: the expression text.",
+    "language": 'expression: "hscript" or "python".',
+    "frame": "keyframe, delete_keyframe: the frame of the key.",
+    "keyframes": "keyframes: a list of {frame, value}.",
+    "locked": "lock: true locks the parameter, false unlocks it.",
+    "src_path": "link: the node to follow.",
+    "src_parm": "link: the parameter to follow.",
+    "name": "spare: the name of one control. snapshot, restore, diff: the record on disk.",
+    "label": "spare: the label of one control.",
+    "parm_type": 'spare: the type of one control, for example "float" or "toggle".',
+    "default": "spare: the default of one control.",
+    "settings": "render_settings: the ROP parameters to write, by name.",
+    "chop_path": "chop_export: the CHOP node.",
+    "channel_name": "chop_export: the channel that drives the parameter.",
+    "follow_reference": "Write the node at the other end of a channel reference. Without it, "
+                        "a write through a reference is refused.",
+    "paths": 'snapshot: the nodes to save; "/obj/geo1/*" names every node in a network. '
+             "restore: put back only these nodes.",
+}
 
 
 def tool(mode: str = "value",
@@ -81,9 +118,6 @@ def tool(mode: str = "value",
                             In a sweep, restore before each variant, not once
                             at the end: a variant that does not name a
                             parameter keeps the value of the one before.
-
-    items: a list of items for several writes, each item a dictionary with the
-    same keys. An argument given outside `items` is the default for every item.
 
     Returns JSON with the value before, the value after, and a reason when the
     write did not take.

@@ -13,7 +13,6 @@ def pdg_cook(path):
 
 def pdg_status(path):
     """Get cook status and work item counts for a TOP network."""
-    import pdg
     node = hou.node(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
@@ -22,15 +21,9 @@ def pdg_status(path):
         raise ValueError(f"No PDG node for: {path}")
     counts = {"waiting": 0, "cooking": 0, "cooked": 0, "failed": 0}
     for wi in pdg_node.workItems:
-        state = wi.state
-        if state == pdg.workItemState.CookedSuccess:
-            counts["cooked"] += 1
-        elif state == pdg.workItemState.Cooking:
-            counts["cooking"] += 1
-        elif state == pdg.workItemState.Waiting:
-            counts["waiting"] += 1
-        elif state == pdg.workItemState.CookedFail:
-            counts["failed"] += 1
+        name = _state_name(wi.state)
+        if name in counts:
+            counts[name] += 1
     counts["total"] = sum(counts.values())
     return {"path": node.path(), **counts}
 
@@ -45,8 +38,8 @@ def pdg_workitems(path, state=None):
         raise ValueError(f"No PDG node for: {path}")
     items = []
     for wi in pdg_node.workItems:
-        wi_state = str(wi.state)
-        if state and state.lower() not in wi_state.lower():
+        wi_state = _state_name(wi.state)
+        if state and state.lower() != wi_state:
             continue
         item = {
             "id": wi.id,
@@ -83,3 +76,14 @@ def pdg_cancel(path):
         raise ValueError(f"No PDG context for: {path}")
     context.cancelCook()
     return {"cancelled": True, "path": node.path()}
+
+
+def _state_name(state):
+    """The short name of a work item state: "cooked", "failed", "cooking",
+    "waiting", or the lower-case enum name for the others."""
+    import pdg
+    names = {pdg.workItemState.CookedSuccess: "cooked",
+             pdg.workItemState.CookedFail: "failed",
+             pdg.workItemState.Cooking: "cooking",
+             pdg.workItemState.Waiting: "waiting"}
+    return names.get(state, str(state).rsplit(".", 1)[-1].lower())

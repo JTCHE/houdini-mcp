@@ -1,7 +1,29 @@
 """stage_inspect — the USD stage that a LOP node makes."""
 from typing import Dict, List, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "path": "The LOP node whose stage to read.",
+    "mode": 'One of "stage", "prims", "prim", "search", "layer", "attribute", '
+            '"composition", "variants", "stats", "modified", "lights", "transform".',
+    "prim_path": 'prim, attribute, composition, variants, stats, transform: the prim, for '
+                 'example "/world/geo/rock".',
+    "pattern": "search: the prim path to match, with * as a wildcard.",
+    "type_name": 'search: keep the prims of this type, for example "Mesh" or "SphereLight".',
+    "attr_name": 'attribute: the attribute to read, for example "points".',
+    "root_prim": "prims: the prim where the tree starts.",
+    "max_depth": "prims: how many levels of the tree come back.",
+    "layer_index": "layer: which layer of the stack, from 0 (the strongest).",
+    "count": "modified: how many prims come back.",
+    "include_attrs": "prim: also return the attributes of the prim.",
+    "frames": "Read at another frame, or at several: one frame, a list, or "
+              '{"start": 1, "end": 10, "step": 2}. The playbar goes back after.',
+}
 
 
 def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = None,
@@ -15,8 +37,6 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
     composition that a node produces.
 
     Do not use it for SOP geometry: geometry_inspect does that.
-
-    path: the LOP node whose stage you want to read.
 
     mode:
         "stage"       — the stage: prim count, layers, the default prim.
@@ -36,10 +56,6 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
         "transform"   — where `prim_path` is in the world: translate, rotate
                         and scale composed through every parent. With
                         `frames`, the path of a moving prim.
-
-    frames: read the same mode at another frame, or at several: one frame, a
-    list of frames, or {"start": 1, "end": 10, "step": 2}. The playbar goes
-    back to where it was.
 
     Returns JSON.
     """

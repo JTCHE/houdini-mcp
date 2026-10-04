@@ -4,9 +4,19 @@ from typing import Any, Dict, List
 
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from ..connection import call, session_line
 from .capture import _picture, _paths
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "operations": 'The steps, in order. Each is {"tool": "<tool name>", "params": {...}}, '
+                  "with the arguments that the tool takes on its own. Any tool of this "
+                  "server except batch.",
+}
 
 
 def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
@@ -18,10 +28,6 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
 
     Do not use it when a later step needs to read what an earlier step made.
     The list runs without you in the middle, so nothing can branch on a result.
-
-    operations: a list. Each item is {"tool": "<tool name>", "params": {...}},
-    with the same parameters that the tool takes on its own. Every tool in this
-    server can go in the list, except batch itself.
 
     Every step is checked before any step runs: a step with a wrong argument
     stops the batch with its index and its error, and nothing changes.

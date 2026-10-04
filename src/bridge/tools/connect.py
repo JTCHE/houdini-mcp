@@ -1,7 +1,25 @@
 """connect — wire nodes, break a wire, change input order."""
 from typing import Any, Dict, List, Optional, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                              idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "connect", "disconnect", "reorder".',
+    "items": 'A list of wires for "connect" or "disconnect", each a dictionary with the '
+             "keys of one wire. An argument outside items is the default for each one.",
+    "src_path": "connect: the node whose output feeds the wire.",
+    "dst_path": "connect: the node whose input takes the wire.",
+    "dst_input_index": "connect: the input of dst_path, from 0.",
+    "src_output_index": "connect: the output of src_path, from 0.",
+    "path": "disconnect and reorder: the node whose inputs change.",
+    "input_index": "disconnect: the input that loses its wire, from 0.",
+    "input_indices": "reorder: the old input indices in their new order, for example [1, 0].",
+}
 
 
 def tool(mode: str = "connect",
@@ -19,9 +37,6 @@ def tool(mode: str = "connect",
                        input, src_output_index the output. Both count from 0.
         "disconnect" — path loses the wire on input_index.
         "reorder"    — path takes its inputs in the order input_indices.
-
-    items: a list of wires for "connect" and "disconnect", each a dictionary
-    with the same keys.
 
     Returns JSON, one line for each wire, with the paths that Houdini used.
     An input index that the node does not have is reported, not dropped.

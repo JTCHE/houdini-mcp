@@ -1,5 +1,22 @@
 """console — what Houdini said, and which nodes hold errors."""
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+# A read takes the entries away, so a second call gives other entries.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=False,
+                              openWorldHint=False)
+
+PARAMS = {
+    "limit": "How many log entries come back, the newest ones.",
+    "severity": 'Keep one level only: "message", "important", "warning", "error" or "fatal".',
+    "source": 'Keep the entries whose source holds this text, for example "Python".',
+    "node_errors": "Also report the nodes under root_path that hold an error or a warning. "
+                   "False gives the log alone.",
+    "root_path": "The network that node_errors walks, for example /obj or /stage.",
+    "node_limit": "How many nodes with an error or a warning come back. Errors come first, "
+                  "and the report says how many it left out.",
+}
 
 
 def tool(limit: int = 100, severity: str = None, source: str = None,
@@ -13,16 +30,6 @@ def tool(limit: int = 100, severity: str = None, source: str = None,
 
     Each call takes the log entries away, so a call returns only what is new
     since the call before it.
-
-    limit: how many log entries come back, the newest ones.
-    severity: keep one level only: "message", "important", "warning", "error"
-              or "fatal".
-    source: keep the entries whose source holds this text, for example
-            "Python".
-    node_errors: also walk the nodes under `root_path` and report the ones with
-                 an error or a warning. Set it to False for the log alone.
-    node_limit: how many such nodes come back. The ones with an error come
-                first, and the report says how many it left out.
 
     Returns JSON.
     """

@@ -1,5 +1,19 @@
 """scene_overview — the lists that say what is in the scene."""
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "scene", "network", "children", "search", "node_types", "errors", '
+            '"materials", "lights", "takes", "caches", "render_nodes", "viewports".',
+    "path": 'A node path such as "/obj" or "/obj/geo1": the network to list or to search.',
+    "pattern": "search: the name to match, with * and ? as wildcards.",
+    "node_type": 'search: keep the nodes of this type, for example "null".',
+    "category": 'node_types: the context, for example "Sop", "Object", "Lop" or "Driver".',
+    "recursive": "children: also list the children of the children.",
+}
 
 
 def tool(mode: str = "scene", path: str = None, pattern: str = None,
@@ -27,9 +41,6 @@ def tool(mode: str = "scene", path: str = None, pattern: str = None,
         "caches"       — file caches under `path` and their state on disk.
         "render_nodes" — the ROP nodes in /out.
         "viewports"    — the panes, and what the scene viewer shows.
-
-    path: a node path such as "/obj" or "/obj/geo1". Each mode says what it
-    means for that mode.
 
     Returns JSON. A path that does not exist comes back as an error, not as an
     empty list.

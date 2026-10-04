@@ -1,7 +1,17 @@
 """select — which nodes are selected."""
 from typing import List, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                              idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "paths": "Leave it out to read the selection. One path or a list of paths replaces it. "
+             "An empty list clears it.",
+}
 
 
 def tool(paths: Union[str, List[str]] = None) -> str:
@@ -9,9 +19,6 @@ def tool(paths: Union[str, List[str]] = None) -> str:
 
     Use it to see what the person works on before you change the scene, and to
     put your own result in front of them when you are done.
-
-    paths: nothing reads the selection. One path or a list of paths replaces
-    it. An empty list clears it.
 
     Returns JSON with the selected paths.
     """

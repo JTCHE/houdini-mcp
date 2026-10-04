@@ -1,5 +1,18 @@
 """pdg — TOP networks and their work items."""
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+# dirty_all removes the outputs on disk.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "path": "The TOP network or the TOP node.",
+    "mode": 'One of "status", "workitems", "cook", "dirty", "cancel".',
+    "state": 'workitems: keep the items in this state, for example "failed" or "cooked".',
+    "dirty_all": "dirty: also remove the outputs of the node on disk.",
+}
 
 
 def tool(path: str, mode: str = "status", state: str = None,
@@ -8,8 +21,6 @@ def tool(path: str, mode: str = "status", state: str = None,
 
     Use it for a TOP network only. A TOP node does not cook like a SOP: it
     makes work items, and each item runs on its own.
-
-    path: the TOP network or the TOP node.
 
     mode:
         "status"    — the counts for each state, and whether a cook runs now.

@@ -1,7 +1,26 @@
 """cook — make Houdini compute, over frames, and report what it cost."""
 from typing import Any, Dict, List, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+# cache_clear removes files on disk.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "paths": "The node to cook, or a list of nodes.",
+    "mode": 'One of "cook", "cache_write", "cache_clear", "sim_step", "sim_reset". '
+            "The description says what each one does.",
+    "frame_range": "[start, end]: every frame between. For cook and cache_write.",
+    "frames": 'One frame, a list of frames, or {"start": 1001, "end": 1010, "step": 2}. '
+              "For cook. The playbar goes back after.",
+    "num_steps": "How many frames sim_step steps the DOP network.",
+    "parameters": 'Values to write before the cook, as {"/obj/geo1/pyro": {"divsize": 0.05}}. '
+                  "The result says which writes changed nothing.",
+    "force": "Cook even when Houdini thinks the node is up to date.",
+}
 
 
 def tool(paths: Union[str, List[str]], mode: str = "cook",
@@ -17,8 +36,6 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
 
     Do not use it to read the result: geometry_inspect does that, and it cooks
     the node as well.
-
-    paths: one node path, or a list of them.
 
     mode:
         "cook"        — cook the nodes and return the errors, the warnings and
@@ -38,13 +55,6 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
                         primitives there. It fails when the result is empty
                         while the sources are not: that simulation stays
                         empty on every frame.
-
-    frames: one frame, a list of frames, or {"start": 1001, "end": 1010,
-    "step": 2}. frame_range is [start, end] and means every frame between.
-
-    parameters: values to write before the cook, as
-    {"/obj/geo1/pyro": {"divsize": 0.05}}. The write reports what it changed
-    and what it did not, in the same result as the cook.
 
     Returns JSON: the seconds in total, for each frame, and the slowest frame,
     with the errors and the warnings of every node. Each frame also gives the

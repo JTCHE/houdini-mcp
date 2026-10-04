@@ -5,7 +5,22 @@ import subprocess
 import sys
 from typing import List
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "start", "progress", "settings", "create", "watch".',
+    "path": "start, progress, settings: the ROP node.",
+    "frame_range": "start: [start, end]. Without it the ROP renders its own range.",
+    "render_type": 'create: the ROP kind, for example "opengl", "karma", "mantra" or "ifd".',
+    "name": "create: the name of the new ROP.",
+    "parent_path": "create: the network that gets the ROP.",
+    "output_path": "watch: the image file to look for on disk.",
+}
 
 PROCESS_NAMES = ("husk", "mantra-bin")
 

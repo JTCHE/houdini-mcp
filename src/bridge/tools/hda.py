@@ -3,7 +3,24 @@ from mcp.types import ToolAnnotations
 
 from ..connection import call_json
 
-ANNOTATIONS = ToolAnnotations(destructiveHint=True)
+# uninstall and section_set change the asset for every node of its type.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "list", "get", "install", "uninstall", "reload", "update", "create", '
+            '"sections", "section_get", "section_set".',
+    "node_type": 'get, sections, section_get, section_set: the asset type, for example '
+                 '"Sop/my_tool".',
+    "category": 'list: keep one node category, for example "Sop".',
+    "file_path": "install, uninstall, reload: the .hda file. create: the file to write.",
+    "node_path": "update: the node to save into its asset. create: the subnet to make an "
+                 "asset from.",
+    "name": "create: the type name of the new asset.",
+    "label": "create: the name that the TAB menu shows.",
+    "section_name": 'section_get, section_set: the section, for example "PythonModule".',
+    "content": "section_set: the text to write into the section.",
+}
 
 
 def tool(mode: str = "list", node_type: str = None, category: str = None,
