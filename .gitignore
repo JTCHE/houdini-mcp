@@ -29,3 +29,4 @@ hip_patterns_index.json
 .*
 !.gitignore
 !.claude-plugin/
+!.github/
