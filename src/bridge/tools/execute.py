@@ -27,7 +27,7 @@ PARAMS = {
     "timeout": "The seconds the script may run. Past it, the script stops where it is, "
                "the answer says where, and what it changed stays.",
     "background": "python: return at once with a job id and let the script run. Read it "
-                  "with mode job. Other calls wait until it ends.",
+                  "with mode job. Until it ends, other calls are refused.",
     "job": "job: the job id that background returned.",
 }
 
@@ -110,9 +110,9 @@ def _start_job(params, budget):
         time.sleep(0.05)
     return json.dumps({"job": number, "state": record["state"],
                        "port": record.get("port"), "timeout": budget,
-                       "next": f"Read it with execute mode='job' job='{number}'. Other "
-                               f"calls wait until it ends; session action='interrupt' "
-                               f"stops it."}, separators=(",", ":"))
+                       "next": f"Read it with execute mode='job' job='{number}'. Until it "
+                               f"ends, other calls are refused; session "
+                               f"action='interrupt' stops it."}, separators=(",", ":"))
 
 
 def _job_report(job):

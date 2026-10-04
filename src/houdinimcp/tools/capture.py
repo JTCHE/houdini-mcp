@@ -41,11 +41,27 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
     if not hou.isUIAvailable():
         # No window, so no viewport. An OpenGL ROP draws without one, and the
         # arguments mean the same thing, so the caller writes the same call.
-        result = offscreen.capture(
-            node_path=node, output=output, frames=_span(frames, frame_range),
-            resolution=resolution, camera=camera, direction=direction or "persp",
-            target=target, look_from=look_from, radius=radius, fill=fill,
-            shading=shading, azimuth=azimuth, elevation=elevation)
+        shared = dict(node_path=node, frames=_span(frames, frame_range),
+                      resolution=resolution, camera=camera, target=target,
+                      look_from=look_from, radius=radius, fill=fill, shading=shading,
+                      azimuth=azimuth, elevation=elevation)
+        if mode == "quad":
+            images = []
+            for name in ("top", "front", "right", "persp"):
+                try:
+                    images.append({"view": name, **offscreen.capture(
+                        output=viewport._numbered(output, name), direction=name, **shared)})
+                except offscreen.Empty as error:
+                    # A flat thing seen from its edge draws nothing, and the
+                    # other views still show it.
+                    images.append({"view": name, "empty": str(error)})
+            drawn = [image for image in images if "filepath" in image]
+            if not drawn:
+                raise offscreen.Empty("The OpenGL ROP drew nothing from any of the four "
+                                      "views. The geometry is empty.")
+            result = {"images": images, "filepath": drawn[-1]["filepath"]}
+        else:
+            result = offscreen.capture(output=output, direction=direction or "persp", **shared)
         return {**result, "window_state": _state()}
 
     if mode == "flipbook" and not (frames or frame_range):

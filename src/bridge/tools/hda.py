@@ -10,8 +10,9 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 PARAMS = {
     "mode": 'One of "list", "get", "install", "uninstall", "reload", "update", "create", '
             '"sections", "section_get", "section_set".',
-    "node_type": 'get, sections, section_get, section_set: the asset type, for example '
-                 '"Sop/my_tool".',
+    "node_type": 'get, sections, section_get, section_set: the asset type, as list names '
+                 'it, for example "labs::edge_damage::1.0", or with its category, '
+                 '"Sop/labs::edge_damage::1.0".',
     "category": 'list: keep one node category, for example "Sop".',
     "file_path": "install, uninstall, reload: the .hda file. create: the file to write.",
     "node_path": "update: the node to save into its asset. create: the subnet to make an "

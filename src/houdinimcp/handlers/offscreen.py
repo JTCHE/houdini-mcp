@@ -16,6 +16,11 @@ import hou
 
 from . import timing, viewport
 
+
+class Empty(RuntimeError):
+    """The picture holds only the background."""
+
+
 # The lens of a new Houdini camera: the one gl_child draws with.
 FOCAL, APERTURE = 50.0, 41.4214
 SHADING = {"smooth": "smooth", "smooth_wire": "smoothwire", "flat": "flat",
@@ -97,7 +102,11 @@ def _aim(box, direction="persp", target=None, look_from=None, radius=None, fill=
         offset = hou.Vector3(direction if isinstance(direction, tuple)
                              else DIRECTIONS.get(direction, DIRECTIONS["persp"])).normalized()
         where = middle + offset * away
-    look = hou.hmath.buildRotateLookAt(where, middle, hou.Vector3(0, 1, 0))
+    # A view along the up axis has no roll to take from it, and the look-at
+    # fails. Then -Z is up, as in the top view of Houdini.
+    down = (where - middle).normalized()[1]
+    up = hou.Vector3(0, 1, 0) if abs(down) < 0.999 else hou.Vector3(0, 0, -1 if down > 0 else 1)
+    look = hou.hmath.buildRotateLookAt(where, middle, up)
     view = _view(where, look.extractRotates(), FOCAL, APERTURE, "perspective", 1.0)
     return view, {"look_from": list(where), "target": list(middle)}
 
@@ -166,9 +175,14 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
     with open(os.path.join(folder, "job.json"), "w") as handle:
         json.dump(job, handle)
     hython = os.path.join(hou.getenv("HFS"), "bin", "hython.exe" if os.name == "nt" else "hython")
-    result = subprocess.run([hython, os.path.join(os.path.dirname(__file__), "gl_child.py"),
+    # The child draws with OpenGL only. An OpenFX plug-in of the system can
+    # crash it as it loads: hython 20.5 started from a session stopped with an
+    # access violation in the DLL init of a CUDA plug-in.
+    environment = {key: value for key, value in os.environ.items() if key != "OFX_PLUGIN_PATH"}
+    environment["HOUDINI_DISABLE_OPENFX_DEFAULT_PATH"] = "1"
+    result = subprocess.run([hython, os.path.join(os.path.dirname(os.path.dirname(__file__)), "gl_child.py"),
                              os.path.join(folder, "job.json")],
-                            capture_output=True, text=True, timeout=600,
+                            capture_output=True, text=True, timeout=600, env=environment,
                             # Houdini has no console, so Windows gives hython a new one on top.
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     written = [hou.text.expandStringAtFrame(picture, index)
@@ -176,10 +190,11 @@ def draw(sources, view, frames, size, shading=None, color_by=None, color_range=N
     missing = [path for path in written if not os.path.isfile(path)]
     if result.returncode != 0 or missing:
         raise RuntimeError(f"The OpenGL ROP drew {len(written) - len(missing)} of "
-                           f"{len(written)} frames. hython said: "
+                           f"{len(written)} frames, and hython stopped with code "
+                           f"{result.returncode & 0xFFFFFFFF:#x}. hython said: "
                            f"{(result.stderr or result.stdout).strip()[-800:]}")
     if all(_empty(path) for path in written):
-        raise RuntimeError(f"The OpenGL ROP drew nothing at any of the {len(written)} frames. "
+        raise Empty(f"The OpenGL ROP drew nothing at any of the {len(written)} frames. "
                            f"The geometry is outside the view, or it is empty.")
     return written
 

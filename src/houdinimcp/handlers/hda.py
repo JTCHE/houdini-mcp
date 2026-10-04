@@ -24,19 +24,7 @@ def hda_list(category=None):
 
 def hda_get(node_type, category=None):
     """Get detailed info about an HDA definition."""
-    nt = None
-    if category:
-        cat = hou.nodeTypeCategories().get(category)
-        if not cat:
-            raise ValueError(f"Category not found: {category}")
-        nt = cat.nodeTypes().get(node_type)
-    else:
-        for cat in hou.nodeTypeCategories().values():
-            nt = cat.nodeTypes().get(node_type)
-            if nt:
-                break
-    if not nt:
-        raise ValueError(f"Node type not found: {node_type}")
+    nt = _find_node_type(node_type, category)
     defn = nt.definition()
     if not defn:
         raise ValueError(f"No HDA definition for: {node_type}")
@@ -142,6 +130,11 @@ def _find_node_type(node_type, category=None):
             nt = cat.nodeTypes().get(node_type)
             if nt:
                 break
+    if not nt and "/" in node_type:
+        # The full name, as nameWithCategory() gives it: "Sop/labs::edge_damage".
+        # Looked up last: some names hold a "/", such as "Object/musclerig::..."
+        # in the Sop category.
+        nt = hou.nodeType(node_type)
     if not nt:
         raise ValueError(f"Node type not found: {node_type}")
     return nt
