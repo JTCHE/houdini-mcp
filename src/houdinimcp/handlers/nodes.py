@@ -43,7 +43,13 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
         # The same write path as parm_set, so a write that does nothing is
         # reported here too instead of passing for success.
         written = parameters_handler.set_parameters(node.path(), parameters)
-        report["parameters"] = written["changes"]
+        # A clean write needs no report: the caller sent the value. Only a
+        # write that failed or that carries a warning comes back.
+        notable = [change for change in written["changes"]
+                   if not change["applied"] or change.get("warnings") or change.get("reason")]
+        report["parameters_set"] = len(written["changes"]) - len(written["not_applied"])
+        if notable:
+            report["parameters"] = notable
         if written["not_applied"]:
             report["not_applied"] = written["not_applied"]
     return report

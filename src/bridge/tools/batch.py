@@ -26,7 +26,8 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
     Every step is checked before any step runs: a step with a wrong argument
     stops the batch with its index and its error, and nothing changes.
 
-    Returns JSON with one result for each operation, and the picture of every
+    Returns JSON with one result for each operation, in the order of the
+    operations, and the picture of every
     capture step. The list stops at the first failure, and the steps before it
     are undone, so a failed batch changes nothing: the report names the index
     that failed and the error. A step whose item failed is a failed step, and
@@ -60,9 +61,8 @@ def tool(operations: List[Dict[str, Any]]) -> list[Image | str]:
         report["_session"] = session_line()
         raise ToolError(json.dumps(report, separators=(",", ":"), default=str))
     pictures = []
-    for step in report.get("results", []):
-        result = step.get("result")
-        if step.get("tool") != "capture" or not isinstance(result, dict):
+    for step, result in zip(steps, report.get("results", [])):
+        if step["tool"] != "capture" or not isinstance(result, dict):
             continue
         for path in _paths(result):
             picture = _picture(path, result)

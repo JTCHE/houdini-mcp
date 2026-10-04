@@ -60,7 +60,7 @@ def _steps(operations, tools, label):
             if "error" not in result:
                 report["failed_result"] = result  # what else the step did
             return report
-        results.append({"tool": tool, "result": result})
+        results.append(result)  # in the order of the operations
     return {"count": len(results), "results": results}
 
 

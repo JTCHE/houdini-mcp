@@ -172,7 +172,7 @@ def get_prims(node_path, start=0, count=100, attribs=None, frame=None):
 
 
 def get_attrib_values(node_path, attrib_name, attrib_class="point", frame=None,
-                      unique=False, start=0, count=20):
+                      unique=False, start=0, count=10):
     """The values of one attribute.
 
     `unique` returns each value that occurs and how many elements carry it,
