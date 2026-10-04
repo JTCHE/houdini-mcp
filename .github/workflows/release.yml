@@ -1,8 +1,9 @@
 name: release
 
-# Tag `v0.7.0` (the version in pyproject.toml) to publish to PyPI and to make
-# the GitHub release. Publishing reads PYPI_API_TOKEN from the repository
-# secrets. With no secret set, it uses PyPI trusted publishing.
+# Tag `v0.7.0` (the version in pyproject.toml) to publish to PyPI, to the MCP
+# Registry, and to make the GitHub release. Publishing reads PYPI_API_TOKEN
+# from the repository secrets. With no secret set, it uses PyPI trusted
+# publishing. The MCP Registry reads the GitHub identity of the job.
 on:
   push:
     tags:
@@ -32,3 +33,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME"
+      - name: MCP Registry
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          version="${GITHUB_REF_NAME#v}"
+          jq --arg v "$version" '.version = $v | .packages[0].version = $v' server.json > server.tmp.json
+          mv server.tmp.json server.json
+          ./mcp-publisher login github-oidc
+          # PyPI can take a moment to serve the new version.
+          for attempt in 1 2 3 4 5; do ./mcp-publisher publish && exit 0; sleep 30; done
+          exit 1

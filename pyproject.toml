@@ -1,6 +1,6 @@
 [project]
 name = "houdini-mcp-server"
-version = "0.7.1"  # Raise .claude-plugin/plugin.json to match. Users get no update until it changes.
+version = "0.7.2"  # Raise .claude-plugin/plugin.json to match. Users get no update until it changes.
 description = "Connect AI Agents to SideFX Houdini, with full documentation and screenshot support."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,9 @@ include = ["src", "houdini_mcp_server.py", "README.md",
 
 [project.scripts]
 houdinimcp-bridge = "bridge.cli:main"
+# `uvx houdini-mcp-server` runs the script with the name of the package. The
+# MCP Registry starts the server that way.
+houdini-mcp-server = "bridge.cli:main"
 houdinimcp-install = "bridge.onboarding.install:cli"
 
 [tool.pytest.ini_options]

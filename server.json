@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.JTCHE/houdini-mcp",
+  "title": "Houdini MCP",
+  "description": "Connect agents to SideFX Houdini: edit the scene, cook, render, see the viewport, read the docs.",
+  "repository": {
+    "url": "https://github.com/JTCHE/houdini-mcp",
+    "source": "github"
+  },
+  "version": "0.7.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "houdini-mcp-server",
+      "version": "0.7.2",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
