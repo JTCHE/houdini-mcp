@@ -6,6 +6,10 @@ safe. So the session writes the geometry of each frame to disk, and this
 script draws all the frames in one render and exits.
 
 Usage: hython gl_child.py job.json
+
+It sits outside handlers/: Python puts the folder of a script first on the
+path, and handlers/ holds pdg.py, code.py and layout.py, which would hide the
+modules of those names.
 """
 import json
 import sys
