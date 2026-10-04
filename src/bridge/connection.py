@@ -309,7 +309,7 @@ def find_hython(version: str = None) -> Optional[str]:
     return shutil.which("hython") or (found[0]["hython"] if found else None)
 
 
-def port_is_listening(port: int, host: str = "localhost") -> bool:
+def port_is_listening(port: int, host: str = protocol.HOST) -> bool:
     """True when a plugin accepts a connection on this port."""
     if not port:
         return False
@@ -453,7 +453,7 @@ def connection(auto_start: bool = True) -> Connection:
     """The connection to the chosen Houdini. Starts a headless one if none listens."""
     global _connection
     if _connection is None:
-        _connection = Connection(host="localhost", port=None)
+        _connection = Connection(host=protocol.HOST, port=None)
     if _connection.sock is not None:
         return _connection
 
@@ -577,7 +577,7 @@ def session_line() -> str:
     return (f"Houdini {_last_session.get('version', '?')} "
             f"{'with a window' if _last_session.get('ui') else 'headless'}, "
             f"pid {_last_session.get('pid')}, port {_last_session.get('port')}, "
-            f"file {_last_session.get('hip') or 'none'}")
+            f"file {os.path.basename(_last_session.get('hip') or '') or 'none'}")
 
 
 def call_json(command: str, params: Dict[str, Any] = None, timeout: float = 60.0,
@@ -590,7 +590,7 @@ def call_json(command: str, params: Dict[str, Any] = None, timeout: float = 60.0
     else:
         result = {"result": result, "_session": session_line(),
                   "_seconds": _last_session["seconds"]}
-    return json.dumps(result, indent=2, default=str)
+    return json.dumps(result, separators=(",", ":"), default=str)
 
 
 def shutdown():
