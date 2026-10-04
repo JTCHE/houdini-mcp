@@ -1,5 +1,18 @@
 """playbar — the current frame, the frame range, and playback."""
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                              idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "get", "frame", "range", "playback", "play".',
+    "frame": "frame: the frame to go to.",
+    "start": "range and playback: the first frame.",
+    "end": "range and playback: the last frame.",
+    "action": 'play: "play", "stop", "next", "previous", "start" or "end".',
+}
 
 
 def tool(mode: str = "get", frame: float = None, start: float = None,

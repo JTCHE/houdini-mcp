@@ -1,7 +1,57 @@
 """geometry_inspect — what a node cooked: points, prims, attributes, volumes."""
 from typing import Any, Dict, List, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+# Only "export" writes, and only the file at `output`.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "path": "The SOP or COP node to read, or a list. A list keeps going after a node that "
+            "fails, and each result names its path.",
+    "mode": 'One of "summary", "points", "prims", "attrib", "groups", "group_members", '
+            '"bbox", "intrinsics", "nearest", "skeleton", "compare", "try", "volume_stats", '
+            '"volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export".',
+    "start": "points, prims, attrib: the first element. Page with it.",
+    "count": "points, prims: how many elements. Keep it small: a large read is slow.",
+    "attribs": 'points: the attributes to return, for example ["P", "Cd"].',
+    "attrib_name": "attrib: the attribute to read.",
+    "attrib_class": 'attrib: "point", "prim", "vertex" or "detail".',
+    "group_name": "group_members: the group to read.",
+    "group_type": 'groups, group_members: "point", "prim", "vertex" or "edge".',
+    "prim_index": "intrinsics: the primitive to read.",
+    "position": "nearest: [x, y, z].",
+    "plane_name": 'image: the COP plane to read, for example "C".',
+    "format": 'export: the file type, for example "obj" or "bgeo".',
+    "output": "export: the file path to write.",
+    "frames": 'Read at other frames, without moving the playbar: one frame, a list, or '
+              '{"start": 1001, "end": 1010, "step": 2}. One answer for each frame.',
+    "unique": "attrib: return each value that occurs and how many elements carry it. That "
+              "is how you find the pieces in a geometry.",
+    "against": "compare: the node to compare with. volume_compare: the field whose bands "
+               "hold the field `name`.",
+    "match_attrib": "compare: the attribute that pairs the points of the two nodes, not "
+                    "their order.",
+    "pattern": "skeleton: keep the joints whose name matches.",
+    "name": "volume_stats: one volume to read. volume_voxels, volume_compare: the field.",
+    "names": "volume_sample: the fields to read.",
+    "positions": "volume_sample: the [x, y, z] points to read at.",
+    "from_node": "volume_sample: read at the points of this node. volume_compare: the node "
+                 "that holds `against`, such as a collider SDF.",
+    "steps": 'try: a list of {"node_type": ..., "parameters": {...}} to run on the geometry '
+             "as verbs. Nothing changes in the scene.",
+    "bins": "volume_stats, volume_sample, volume_compare: a count of equal bands, or a list "
+            "of band edges, for example [-1, 0, 0.05, 0.15, 0.25].",
+    "limit": "attrib: how many values (10). volume_voxels: how many numbers before the array "
+             "is thinned. volume_sample: return the values when there are at most this many "
+             "(1000).",
+    "reduce": 'volume_voxels: one answer instead of the array: "sum", "mean", "max", "min", '
+              '"project_x", "project_y" or "project_z".',
+    "threshold": "volume_stats, volume_sample: count the voxels below and above it. "
+                 "volume_stats also gives the world box of the voxels above it.",
+}
 
 
 def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, count: int = 100,
@@ -23,13 +73,6 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
     bounding box.
 
     Do not use it to read parameters: node_inspect does that.
-
-    path: the SOP or COP node to read, or a list of them. A list keeps going
-    after a node that fails, and each result names its path.
-
-    frames: read at other frames without moving the playbar of the user. One
-    number, a list, or {"start": 1001, "end": 1010, "step": 2}. The result then
-    holds one answer for each frame. The user stays on the frame they were on.
 
     mode:
         "summary"        — counts, attributes, groups, volumes, bounds. Start
@@ -81,8 +124,6 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
                            field `against`. The answer to "how much smoke is
                            inside the collider". `from_node` holds `against`
                            when another node does, such as the collider SDF.
-    bins: a count of equal bands, or a list of band edges, for example
-    [-1, 0, 0.05, 0.15, 0.25] for inside, 0-5 cm, 5-15 cm and 15-25 cm.
         "image"          — a COP node: resolution, planes, and `plane_name`.
         "volume"         — the VDB grids in a COP node.
         "export"         — write the geometry to disk. `format` is "obj",

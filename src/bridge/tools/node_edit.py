@@ -1,7 +1,49 @@
 """node_edit — make, name, move, flag and delete nodes."""
 from typing import Any, Dict, List, Optional, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "create", "delete", "copy", "move", "rename", "flags", "color", '
+            '"layout", "wrangle", "material", "assign_material", "take", '
+            '"current_network", "note", "box".',
+    "items": "A list of items for a repeated action, each a dictionary with the keys of "
+             "one call. An argument outside items is the default for each one.",
+    "path": "The node to change. layout: the network. delete: a node, a sticky note or a "
+            "network box.",
+    "parent_path": "create, wrangle, note: the network that gets the new node.",
+    "node_type": 'create: the node type, for example "box" or "attribwrangle".',
+    "name": "create, material: the name of the new node. take: the name of a new take.",
+    "context": 'create: the network kind, "sop" (default), "cop", "chop", "lop" or '
+               '"material_network".',
+    "position": "create, move, note: [x, y] on the canvas.",
+    "parameters": "create, material: values to set on the new node, by parameter name.",
+    "destination_path": "copy, move: the network to put the nodes in.",
+    "new_name": "rename: the new name.",
+    "display": "flags: the display flag.",
+    "render": "flags: the render flag, which is not the display flag.",
+    "bypass": "flags: the bypass flag.",
+    "color": "color, note, box: [r, g, b] from 0 to 1.",
+    "code": "wrangle: the VEX snippet.",
+    "material_type": 'material: the shader type, for example "principledshader".',
+    "material_path": "assign_material: the material node.",
+    "take_name": "take: the take to make current.",
+    "input_path": "create: the node that feeds the new node. It saves a connect call and "
+                  "places the node under its input.",
+    "code_file": "wrangle: read the VEX from this file, so a long snippet travels once.",
+    "replace": 'wrangle: edit the snippet in place, a list of {"old": ..., "new": ...}. '
+               "Each old must appear exactly once.",
+    "paths": "copy: the nodes to copy. layout: place only these nodes. box: the nodes to "
+             "put in the box.",
+    "suffix": "copy: text added to the name of each copy.",
+    "names": "copy: a new name for each source, by source path or name.",
+    "text": "note: the text of the note. box: the comment of the box.",
+}
 
 
 def tool(mode: str = "create",
@@ -67,13 +109,6 @@ def tool(mode: str = "create",
                              the nodes.
         "box"              — paths, text, color: a network box around those
                              nodes, with text as its comment.
-
-    items: a list of items for a repeated action, each item a dictionary with
-    the same keys. An argument given outside `items` is the default for every
-    item. Leave `items` empty for one action.
-
-    input_path: the node that feeds the new node. It saves a connect call, and
-    it puts the new node in a sensible place on the canvas.
 
     Returns JSON. Houdini adds a numeric suffix when a name is already used, so
     read the path in the result and use that path from then on. Never look the

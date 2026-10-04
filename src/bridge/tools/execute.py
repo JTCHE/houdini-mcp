@@ -11,7 +11,25 @@ from houdinimcp import protocol
 from .. import connection
 from ..connection import HoudiniError, call_json
 
-ANNOTATIONS = ToolAnnotations(destructiveHint=True, readOnlyHint=False)
+# The code runs with the rights of the Houdini process, so it can reach anything.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=True)
+
+PARAMS = {
+    "source": "The code: Python, HScript, an expression or VEX, as mode says.",
+    "mode": 'One of "python", "hscript", "expression", "vex_check", "env", "job".',
+    "language": 'expression: "hscript" or "python".',
+    "name": 'env: the Houdini variable to read, for example "HIP".',
+    "file": 'A Python file to run instead of source, as from a shell: __file__ is its '
+            'path, __name__ is "__main__", args are in sys.argv[1:]. The text travels once.',
+    "globals": 'Names that exist before the script runs, for example {"radius": 2.0}.',
+    "args": "file: the values of sys.argv[1:].",
+    "timeout": "The seconds the script may run. Past it, the script stops where it is, "
+               "the answer says where, and what it changed stays.",
+    "background": "python: return at once with a job id and let the script run. Read it "
+                  "with mode job. Other calls wait until it ends.",
+    "job": "job: the job id that background returned.",
+}
 
 # Background jobs of this bridge, by id. A job holds the connection while it
 # runs, so Houdini answers the next call only when it ends.
@@ -48,21 +66,9 @@ def tool(source: str = None, mode: str = "python", language: str = "hscript",
         "job"        — the state of the background job `job`: running, with
                        what it printed so far, or done, with its result.
 
-    file: a Python file that Houdini reads and runs, instead of `source`. It
-    runs as from a shell: `__file__` is its path, `__name__` is "__main__",
-    and `args` are in `sys.argv[1:]`. Use it for a script that you run again
-    with other values: the text then travels once, not once for each run.
-
-    globals: names that exist before the script runs, for example
-    {"radius": 2.0}.
-
-    timeout: the seconds the script may run, 30 by default. Houdini answers
-    nothing while a script runs, so a script past its budget stops where it
-    is, and the answer says where. What it changed before that stays.
-
-    background: return at once with a job id, and let the script run. Read it
-    with mode "job". Use it with a large timeout for long work, such as a
-    sweep. Other calls wait until it ends; session action='interrupt' stops it.
+    Use `file` for a script that you run again with other values. Houdini
+    answers nothing while a script runs: for long work, such as a sweep, use
+    `background` with a large `timeout`. session action='interrupt' stops it.
     """
     if mode == "job":
         return _job_report(job)

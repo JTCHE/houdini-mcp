@@ -1,7 +1,35 @@
 """node_inspect — everything about one node, or about a list of nodes."""
 from typing import Any, Dict, List, Union
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call_json
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "paths": "One node path, or a list. A list keeps going after a node that fails, and "
+             "each result names its path.",
+    "mode": 'One of "info", "parms", "schema", "changed", "names", "expression", '
+            '"keyframes", "code", "cook_chain", "explain", "material", "image", "channels", '
+            '"simulation", "render_settings", "cache", "time_dependency", "validate", '
+            '"layout", "readers".',
+    "parm": "parms, expression, keyframes, readers: the parameter name.",
+    "include_all_parms": "info: list every parameter, not only the ones that changed.",
+    "object_name": "simulation: the DOP object to read.",
+    "field_name": "simulation: the field of object_name to read.",
+    "channel": "channels: the CHOP channel whose samples to read.",
+    "start": "channels: the first sample frame.",
+    "end": "channels: the last sample frame.",
+    "pattern": "parms, changed: keep the parameters whose name or label holds this text or "
+               'matches it as a glob. "|" separates alternatives: "time|step|cfl".',
+    "has_expression": "parms: keep only the parameters that carry an expression.",
+    "fields": 'parms, changed: keep only these keys of each parameter, for example '
+              '["value", "expression"]. The name is always kept.',
+    "frames": "Read at another frame, or at several: one frame, a list, or "
+              '{"start": 1, "end": 10, "step": 2}. With time_dependency, time each node. '
+              "The playbar goes back after.",
+}
 
 
 def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
@@ -18,9 +46,6 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
     cook.
 
     Do not use it to list a network: scene_overview does that.
-
-    paths: one node path, or a list of them. A list keeps going after a node
-    that fails, and each result names its path.
 
     mode:
         "info"            — type, inputs, outputs, flags, changed parameters.
@@ -62,16 +87,7 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
                             reference or an expression: what else a write to
                             it changes.
 
-    pattern: keep the parameters whose name or label holds this text, or
-    matches it as a glob. "|" separates alternatives: "time|step|cfl".
-    has_expression: keep only the parameters that carry an expression.
-    fields: keep only these keys of each parameter in "parms" and "changed",
-    for example ["value", "expression"]. The name is always kept. A solver has
-    hundreds of parameters: give pattern or fields.
-
-    frames: read the same mode at another frame, or at several: one frame, a
-    list of frames, or {"start": 1, "end": 10, "step": 2}. The playbar goes
-    back to where it was.
+    A solver has hundreds of parameters: give pattern or fields.
 
     Returns JSON. A cook error comes back in the result: an empty geometry with
     no error line means the node cooked and made nothing.

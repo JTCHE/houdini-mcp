@@ -3,7 +3,16 @@ from mcp.types import ToolAnnotations
 
 from ..connection import call_json
 
-ANNOTATIONS = ToolAnnotations(destructiveHint=True)
+# load drops the session and its undo history.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
+                              idempotentHint=False, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "info", "save", "load", "undo", "redo".',
+    "path": "save: the file to write; empty saves over the open file. load: the .hip "
+            "file to open.",
+    "count": "undo and redo: how many steps.",
+}
 
 
 def tool(mode: str = "info", path: str = None, count: int = 1) -> str:

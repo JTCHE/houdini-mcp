@@ -5,7 +5,67 @@ from typing import Dict, List, Union
 
 from mcp.server.mcpserver import Image
 
+from mcp.types import ToolAnnotations
+
 from ..connection import call
+
+# The view, the flags and the playbar go back after the picture. Only a file
+# is written.
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "mode": 'One of "viewport", "quad", "camera", "flipbook", "sheet", "movie".',
+    "node": "The node to look at. It gets the display flag for the picture, and the flag "
+            "goes back after. The viewer shows its network, and goes back after. Without "
+            "`frame`, the view also frames it.",
+    "output": "The file to write. Without it, a temporary file.",
+    "camera": "camera mode: the camera node to look through. On a LOP network with "
+              "`renderer`, a USD camera prim.",
+    "direction": 'The view axis: "top", "front", "left", "right", "back", "bottom" or '
+                 '"persp".',
+    "shading": 'One of "smooth", "smooth_wire", "flat", "wireframe".',
+    "renderer": 'The Hydra renderer of a viewer on a LOP network, for example "Karma CPU". '
+                "An unknown name lists the ones available.",
+    "frame": 'What to frame the view on: "selection", "all", or a node path (the box of '
+             "what that node cooked).",
+    "target": "[x, y, z]: the point that the view turns around.",
+    "look_from": "[x, y, z]: the point that the view looks from.",
+    "radius": "The distance between target and look_from.",
+    "fill": "How much of the picture the framed thing takes: 0.9 leaves air around it, "
+            "1.0 fills it.",
+    "frame_range": "flipbook and movie: [start, end].",
+    "frames": 'One frame, a list, or {"start": 1, "end": 10, "step": 2}: one picture for '
+              "each. sheet: the frames of the tiles. The playbar goes back after. A picture "
+              "that holds only the background is an error.",
+    "resolution": "[width, height] in pixels. The height follows the shape of the viewport, "
+                  "so the picture is not stretched.",
+    "azimuth": "Degrees around the up axis, around what the view frames. 0 looks from the "
+               "front. Nothing is added to the scene.",
+    "elevation": "Degrees above the ground, with azimuth. 30 with azimuth 45 is a "
+                 "three-quarter view.",
+    "start": "sheet: the first frame. Without it, the current frame.",
+    "step": "sheet: the frames between tiles. Over 2 hides movement and gives a warning.",
+    "count": "sheet: how many tiles, when frames is not given.",
+    "columns": "sheet: tiles in each row.",
+    "tile_width": "sheet: the width of each tile in pixels.",
+    "background": "sheet and movie: the grey of the background, 0-255. Smoke reads best on "
+                  "mid grey.",
+    "reference": "sheet: a picture file to put in the first tile, to compare.",
+    "color_by": "sheet and movie: colour the points by this attribute, blue at the low end "
+                "of color_range and red at the high end. A vector uses its length.",
+    "color_range": "[low, high] for color_by. Without it, [0, 1].",
+    "fps": "movie: frames per second.",
+    "contour": "sheet: a step. Colour by the fraction of the value over the step, so the "
+               "lines of equal value show, for example the shells of a distance field.",
+    "slab": '[axis, thickness], for example ["z", 0.1]: draw only the points in a thin cut '
+            "through the middle, so the inside of a solid cloud shows.",
+    "vectors": "sheet: a scale. Draw a line along the color_by vector from up to about 3000 "
+               "points. An empty result is an error.",
+    "settle": "Seconds that a renderer such as Karma draws before each picture. Karma "
+              "starts from noise: 20 to 30 gives a clean frame. With frames or in flipbook "
+              "mode it renders a sequence through the viewport, with no husk and no render "
+              "license.",
+}
 
 # A picture larger than this goes back as a path, because the message that
 # holds it must stay small enough for the client to read.
@@ -55,69 +115,20 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                      range) as an MP4 at `fps`, `resolution` [width] wide.
                      Returns the path; open it in a player.
         Both draw with an OpenGL ROP, with or without a window, over a flat
-        grey `background` (0-255, 96 by default: smoke reads best on mid
-        grey). `color_by` colours the points by an attribute, blue at the low
-        end of `color_range` [low, high] and red at the high end; a vector
-        attribute uses its length. To see where a point attribute lives, use
-        "sheet" with one frame and these:
-            contour — a step: colour by the fraction of the value over the
-                      step. The lines of equal value show the shape of a
-                      field, for example the shells of a distance field.
-            slab    — [axis, thickness], for example ["z", 0.1]: only the
-                      points in a thin cut through the middle, so the inside
-                      of a solid cloud shows.
-            vectors — a scale: a line along the `color_by` vector from up to
-                      about 3000 points. An empty result is an error.
+        grey `background`. To see where a point attribute lives, use
+        "sheet" with one frame and `color_by`, with `contour`, `slab` or
+        `vectors`.
 
     A Houdini with no window has no viewport, and there an OpenGL ROP draws the
     same picture from the same arguments over a grey background. It runs in a
     new hython, so the scene gets no camera and no ROP.
 
-
     There is no picture of the network editor: every Houdini pane is a native
     GL drawable, and Qt draws nothing into it. Read the graph with node_inspect.
 
-    node: the node to look at. Its display flag is set for the picture and the
-    node that held the flag gets it back after. When the viewer shows another
-    network, it shows the network of the node for the picture and goes back
-    after. Without `frame` the view also frames that node.
-
-    frames: one frame, a list, or {"start": 1, "end": 10, "step": 2}: one
-    picture for each, and the playbar goes back after. A picture that holds
-    only the background is an error, not a result.
-
-    Aim the view with any of these:
-        frame      — "selection", "all", or the path of a node: frame the view
-                     on the box of what that node cooked.
-        fill       — how much of the picture the framed thing takes. 0.9 leaves
-                     air around it; 1.0 fills the frame.
-        target     — [x, y, z] that the view turns around.
-        look_from  — [x, y, z] that the view looks from.
-        radius     — the distance between the two.
-        direction  — "top", "front", "left", "right", "back", "bottom",
-                     "persp".
-        azimuth    — turn the view around what it frames, in degrees around
-                     the up axis; with `elevation`, the degrees above the
-                     ground. 0 and 0 look from the front; azimuth 45 and
-                     elevation 30 give a three-quarter view. Nothing is added
-                     to the scene.
-        camera     — look through this camera node.
-        shading    — "smooth", "smooth_wire", "flat", "wireframe".
-        renderer   — the Hydra renderer of a viewer on a LOP network, for
-                     example "Karma CPU". An unknown name lists the ones
-                     available. `camera` can then be a USD camera prim.
-        settle     — the seconds that a renderer such as Karma draws before
-                     each picture. Karma starts from noise, and a picture
-                     taken at once is blank. 20 to 30 gives a clean frame.
-                     With `frames`, or in mode "flipbook", it renders a
-                     sequence through the viewport, one frame at a time,
-                     with no husk and no render license, and gives the
-                     seconds of each frame. The renderer, the
-                     shading and the camera guides go back after.
-
-    output: where to write the file. Without it, Houdini writes to a temporary
-    file. resolution is [width, height]; the height follows the shape of
-    the viewport, so the picture is not stretched.
+    Aim the view with `frame` and `fill`, with `target`, `look_from` and
+    `radius`, with `direction`, with `azimuth` and `elevation`, or with
+    `camera`.
 
     Returns the picture, plus JSON with the state of the window: the frame, the
     open file, the selection, the network in front, and which nodes carry the

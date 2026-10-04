@@ -3,7 +3,9 @@
 A tool module holds:
     tool(...)     the function that the client calls. Its name is the module
                   name, its docstring is what the client reads.
-    ANNOTATIONS   optional ToolAnnotations, for example destructiveHint.
+    ANNOTATIONS   ToolAnnotations: what the tool can change.
+    PARAMS        the description of each argument, by name. The client reads
+                  it in the input schema, next to the type.
 """
 import difflib
 import functools
@@ -27,13 +29,30 @@ def build() -> list:
     for name in sorted(module.name for module in pkgutil.iter_modules(__path__)):
         module = importlib.import_module(f"{__name__}.{name}")
         tool = Tool.from_function(_guarded(module.tool), name=name,
-                                  annotations=getattr(module, "ANNOTATIONS", None))
+                                  annotations=module.ANNOTATIONS)
         # An argument that the tool does not take is refused, not dropped: a
         # dropped filter returns everything and reads as a filter that matched.
         model = tool.fn_metadata.arg_model
         model.model_config["extra"] = "forbid"
         model.model_rebuild(force=True)
         tool.parameters = model.model_json_schema(by_alias=True)
+        properties = tool.parameters["properties"]
+        if set(module.PARAMS) != set(properties):
+            raise RuntimeError(f"{name}.PARAMS must describe exactly: {', '.join(properties)}.")
+        # The title that pydantic makes from a name says nothing the name does not.
+        tool.parameters.pop("title", None)
+        for key, text in module.PARAMS.items():
+            schema = properties[key]
+            schema.pop("title", None)
+            # Every optional argument takes null (see _guarded), so the schema
+            # need not say so for each one.
+            kinds = [kind for kind in schema.get("anyOf", ()) if kind != {"type": "null"}]
+            if "anyOf" in schema:
+                del schema["anyOf"]
+                schema.update(kinds[0] if len(kinds) == 1 else {"anyOf": kinds})
+            if "default" in schema and schema["default"] is None:
+                del schema["default"]
+            schema["description"] = text
         tool.fn_metadata = _Metadata.model_construct(**{
             key: getattr(tool.fn_metadata, key) for key in FuncMetadata.model_fields})
         TOOLS[name] = tool

@@ -7,6 +7,7 @@ import sys
 from urllib.parse import parse_qsl
 
 from houdinimcp import protocol
+from mcp.types import ToolAnnotations
 
 from ..connection import call, last_version
 
@@ -22,6 +23,28 @@ CATEGORY_TO_DIR = {
     "CopNet": "cop2",
     "VopNet": "vop",
     "Shop": "shop",
+}
+
+
+ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+PARAMS = {
+    "query": 'Words to search, for example "copy to points". Returns the hits with their '
+             "page paths.",
+    "page": 'A page path from a hit, for example "nodes/sop/copytopoints". A loose name or '
+            "a sidefx.com address also works.",
+    "node": 'A node path in the scene, for example "/obj/geo1/attribwrangle1", or a node '
+            'type name, for example "mountain". Returns the page of that node type.',
+    "category": 'query: keep the search inside one folder, for example "nodes/sop", '
+                '"vex/functions" or "hom/hou". node with a type name: the context, for '
+                'example "sop" or "lop".',
+    "limit": "query: how many hits come back.",
+    "build": 'The Houdini build to read, for example "21.0.829". Default: the build of the '
+             "attached session, then $HFS, then the newest build on this machine.",
+    "section": 'Read only the part of a page under one heading, for example "Quick renders '
+               'and flipbooks". A long page lists its headings.',
+    "part": "A long page comes in parts of about 20,000 characters: 2, 3 and so on read "
+            "the next ones.",
 }
 
 
@@ -41,31 +64,9 @@ def tool(query: str = None, page: str = None, node: str = None,
     build exactly. The first search on a build indexes it once, which takes a
     few seconds; the index stays on disk. A page read never waits for it.
 
-    Give exactly one of:
-        query — words to search, for example "copy to points". Returns the
-                hits with their page paths. Read one with `page`.
-        page  — a page path from a hit, for example "nodes/sop/copytopoints".
-                A loose name or a sidefx.com address also works. Returns the
-                text of the page.
-        node  — a path to a node in the scene, for example
-                "/obj/geo1/attribwrangle1", or a node type name, for example
-                "mountain". Returns the page of that node type. A path is the
-                only input that needs Houdini. With a type name, `category`
-                picks the context: "sop", "lop", "obj" and so on.
-
-    category: keep the search inside one folder of pages, for example
-    "nodes/sop", "vex/functions" or "hom/hou".
-
-    build: read a specific Houdini build, for example "21.0.829". Default: the
-    build of the Houdini this bridge talks to, so the page matches the session
-    you work in. Without a session, the Houdini in $HFS, then the newest build
-    on this machine.
-
-    section: read only the part of a page under one heading, for example
-    "Quick renders and flipbooks". A long page lists its headings.
-
-    part: a long page comes in parts of about 20,000 characters. Read the next
-    one with part=2, 3 and so on.
+    Give exactly one of `query` (search), `page` (read a page from a hit) or
+    `node` (the page of a node type). A node path is the only input that needs
+    Houdini.
 
     Returns markdown for a page, JSON for a search.
     """
