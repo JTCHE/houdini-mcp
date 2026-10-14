@@ -45,6 +45,7 @@ class HoudiniMCPServer:
         self.waiting = None   # the call that waits for the event loop
         # One object, so removeEventLoopCallback finds the callback it added.
         self._poll = self._process_server
+        self._on_scene = self._scene_changed
 
     def start(self):
         """Listen on the port. In a GUI the Houdini event loop drives the poll.
@@ -71,6 +72,9 @@ class HoudiniMCPServer:
         self.socket.listen(8)
         self.port = self.socket.getsockname()[1]
         protocol.announce(self.port, identity())
+        # The session file names the scene; write it again when the scene
+        # changes, or a session list names the file that was open at start.
+        hou.hipFile.addEventCallback(self._on_scene)
         watchdog.start()
         self.socket.setblocking(False)
         self.running = True
@@ -100,8 +104,17 @@ class HoudiniMCPServer:
         if self.socket:
             self.socket.close()
         self.socket = None
+        try:
+            hou.hipFile.removeEventCallback(self._on_scene)
+        except hou.OperationFailed:
+            pass
         protocol.withdraw(self.port)
         print("HoudiniMCP server stopped")
+
+    def _scene_changed(self, event):
+        if event in (hou.hipFileEventType.AfterLoad, hou.hipFileEventType.AfterSave,
+                     hou.hipFileEventType.AfterClear):
+            protocol.announce(self.port, identity())
 
     def _drop(self, client):
         self.clients.pop(client, None)

@@ -93,11 +93,12 @@ def announce(port: int, facts: dict) -> None:
 
 
 def withdraw(port: int) -> None:
-    """Remove the session file of a plugin that stopped listening."""
-    try:
-        os.remove(_session_file(port))
-    except OSError:
-        pass
+    """Remove the files of a plugin that stopped listening."""
+    for path in (_session_file(port), output_file(port), interrupt_file(port)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def sessions() -> list:

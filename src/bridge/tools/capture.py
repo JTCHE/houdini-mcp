@@ -62,6 +62,9 @@ PARAMS = {
             "through the middle, so the inside of a solid cloud shows.",
     "vectors": "sheet: a scale. Draw a line along the color_by vector from up to about 3000 "
                "points. An empty result is an error.",
+    "azimuths": "sheet: a list of angles; each frame is drawn from each angle.",
+    "bounds": "sheet: [xmin, ymin, zmin, xmax, ymax, zmax], the box to frame.",
+    "paths": "network: the items to frame in the network editor.",
     "settle": "Seconds that a renderer such as Karma draws before each picture. Karma "
               "starts from noise: 20 to 30 gives a clean frame. With frames or in flipbook "
               "mode it renders a sequence through the viewport, with no husk and no render "
@@ -86,8 +89,13 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          background: int = 96, reference: str = None, color_by: str = None,
          color_range: List[float] = None, fps: float = 24, contour: float = None,
          slab: List[Union[str, float]] = None,
-         vectors: float = None, settle: float = None) -> list[Image | str]:
-    """Make a picture of the scene and look at it.
+         vectors: float = None, settle: float = None,
+         azimuths: List[float] = None, bounds: List[float] = None,
+         paths: List[str] = None) -> list[Image | str]:
+    """Make a picture of the scene, or of the network editor, and look at it.
+
+    Modes: "viewport", "quad", "camera", "flipbook", "sheet", "movie",
+    "network".
 
     Use it to confirm your own work: numbers in a node do not tell you that the
     result looks wrong. Use it before you report that a task is done.
@@ -112,20 +120,26 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                      compare. `columns`, `tile_width` set the grid. The
                      frames cook in order, forward, and the result gives
                      the cook seconds of each one.
+                     `azimuths` (a list of angles) draws each frame from
+                     each angle: one frame and 8 angles is a turntable.
+                     `bounds` [xmin, ymin, zmin, xmax, ymax, zmax] is the
+                     box to frame, for example the hands only.
         "movie"    — `node` over `frames` or `frame_range` (the playbar
                      range) as an MP4 at `fps`, `resolution` [width] wide.
                      Returns the path; open it in a player.
-        Both draw with an OpenGL ROP, with or without a window, over a flat
-        grey `background`. To see where a point attribute lives, use
+        "network"  — the network editor as the user sees it: names, wires,
+                     dots, comments. `node` is the network to show, `paths`
+                     the items to frame (default all). The view goes back
+                     after. It grabs screen pixels, so it works only while
+                     Houdini is the window in front; else it refuses.
+        sheet and movie draw with an OpenGL ROP, with or without a window,
+        over a flat grey `background`. To see where a point attribute lives, use
         "sheet" with one frame and `color_by`, with `contour`, `slab` or
         `vectors`.
 
     A Houdini with no window has no viewport, and there an OpenGL ROP draws the
     same picture from the same arguments over a grey background. It runs in a
     new hython, so the scene gets no camera and no ROP.
-
-    There is no picture of the network editor: every Houdini pane is a native
-    GL drawable, and Qt draws nothing into it. Read the graph with node_inspect.
 
     Aim the view with `frame` and `fill`, with `target`, `look_from` and
     `radius`, with `direction`, with `azimuth` and `elevation`, or with
@@ -152,7 +166,8 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
                               "background": background, "reference": reference,
                               "color_by": color_by, "color_range": color_range,
                               "fps": fps, "contour": contour, "slab": slab,
-                              "vectors": vectors, "settle": settle},
+                              "vectors": vectors, "settle": settle,
+                              "azimuths": azimuths, "bounds": bounds, "paths": paths},
                   timeout=300.0 + (settle or 0) * 1.5 * _count(frames))
 
     contents = []

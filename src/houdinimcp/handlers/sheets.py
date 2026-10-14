@@ -19,7 +19,12 @@ from . import offscreen, timing, viewport
 SLOW_STEP = 2
 
 
-def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
+def _render(node_path, wanted, size, azimuth, elevation, fill, azimuths=None, bounds=None,
+            **look):
+    """Draw the node at each frame. With `azimuths`, draw each frame from each
+    of those angles: the paths come frame by frame, angle by angle. `bounds`
+    [xmin, ymin, zmin, xmax, ymax, zmax] is the box to frame instead of the
+    whole travel of the node."""
     node = hou.node(node_path)
     if node is None:
         raise ValueError(f"Node not found: {node_path}")
@@ -38,8 +43,18 @@ def _render(node_path, wanted, size, azimuth, elevation, fill, **look):
     if not box.isValid():
         raise ValueError(f"{node_path} cooked no geometry at frames {wanted[0]:g} to "
                          f"{wanted[-1]:g}.")
+    if bounds:
+        box = hou.BoundingBox(*bounds)
     aim = {key: look.pop(key, None) for key in ("target", "look_from", "radius")}
     named = look.pop("direction", None)
+    if azimuths:
+        drawn = []
+        for frame in wanted:
+            for angle in azimuths:
+                view, _ = offscreen._aim(box, offscreen._orbit_direction(angle, elevation),
+                                         fill=fill, **aim)
+                drawn += offscreen.draw([node], view, [frame], size, **look)
+        return drawn, seconds
     direction = offscreen._orbit_direction(azimuth, elevation) \
         if azimuth is not None or elevation is not None else (named or "persp")
     view, _ = offscreen._aim(box, direction, fill=fill, **aim)
@@ -74,9 +89,12 @@ def sheet(node_path, frames=None, start=None, step=1, count=12, columns=None,
         _label(tile, "reference")
         tiles.append(tile)
     drawn, seconds = _render(node_path, wanted, size, azimuth, elevation, fill, **look)
-    for frame, path in zip(wanted, drawn):
+    angles = look.get("azimuths") or [None]
+    labels = [f"{frame:g}" + (f" az {angle:g}" if angle is not None else "")
+              for frame in wanted for angle in angles]
+    for label, path in zip(labels, drawn):
         tile = offscreen.over_grey(path, background)
-        _label(tile, f"{frame:g}")
+        _label(tile, label)
         tiles.append(tile)
 
     columns = int(columns or math.ceil(math.sqrt(len(tiles))))

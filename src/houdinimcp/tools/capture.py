@@ -6,11 +6,11 @@ so the same call answers in hython and in a Houdini with a window.
 import hou
 
 from . import unknown_mode
-from ..handlers import offscreen, sheets, viewport
+from ..handlers import network_view, offscreen, sheets, viewport
 
 MUTATES = True  # a capture moves the view, and puts it back after
 
-MODES = ("viewport", "quad", "camera", "flipbook", "sheet", "movie")
+MODES = ("viewport", "quad", "camera", "flipbook", "sheet", "movie", "network")
 
 
 def run(mode="viewport", node=None, output=None, camera=None, direction=None,
@@ -19,9 +19,13 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         resolution=None, azimuth=None, elevation=None, start=None, step=1,
         count=12, columns=None, tile_width=320, background=96, reference=None,
         color_by=None, color_range=None, fps=24, contour=None, slab=None,
-        vectors=None, settle=None):
+        vectors=None, settle=None, azimuths=None, bounds=None, paths=None):
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
+    if mode == "network":
+        if not hou.isUIAvailable():
+            raise ValueError("mode 'network' needs a Houdini with a window.")
+        return _with_state(network_view.capture(node, paths, output))
     if mode in ("sheet", "movie"):
         # An OpenGL ROP draws these with or without a window, so the call is
         # the same in both.
@@ -35,7 +39,8 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
         if mode == "sheet":
             return sheets.sheet(frames=frames, start=start, step=step, count=count,
                                 columns=columns, tile_width=tile_width,
-                                reference=reference, **shared)
+                                reference=reference, azimuths=azimuths, bounds=bounds,
+                                **shared)
         return sheets.movie(frames=_span(frames, frame_range), fps=fps,
                             width=(resolution or [640])[0], **shared)
     if not hou.isUIAvailable():

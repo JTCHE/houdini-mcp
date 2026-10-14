@@ -63,6 +63,15 @@ def look_through(viewer, port, camera_path):
         raise ValueError(f"The stage has no camera prim at {camera_path}.")
 
 
+def camera_shape(camera_path):
+    """(resx, resy) of a camera node, or None. A picture through the camera
+    must keep the shape of its frame, not the shape of the viewport."""
+    cam = hou.node(camera_path)
+    if cam is None or cam.parm("resx") is None or cam.parm("resy") is None:
+        return None
+    return cam.evalParm("resx"), cam.evalParm("resy")
+
+
 def set_viewport_display(shading_mode=None, guide=None):
     """Set viewport display options (shading mode, guides)."""
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
@@ -298,23 +307,38 @@ def aim(port, target=None, look_from=None, radius=None):
     target is what the view turns around. look_from is a position that says
     from where. radius is the distance between the two. Any of them alone is
     useful: target alone moves the pivot, radius alone comes closer.
+
+    The eye of a viewport camera is pivot + (translation - pivot) * rotation,
+    so the eye at `radius` from the pivot needs translation = pivot +
+    (0, 0, radius). The view is read back and compared with the request: a
+    picture from another place than the one asked for is an error, not a
+    picture.
     """
+    before = _view(port)
     camera = port.defaultCamera()
     if target is not None:
         camera.setPivot(hou.Vector3(target))
+    pivot = hou.Vector3(camera.pivot())
     if look_from is not None:
-        to = hou.Vector3(target) if target is not None else camera.pivot()
-        rotate = hou.hmath.buildRotateLookAt(hou.Vector3(look_from), to,
+        rotate = hou.hmath.buildRotateLookAt(hou.Vector3(look_from), pivot,
                                              hou.Vector3(0, 1, 0))
         camera.setRotation(rotate.extractRotationMatrix3().transposed())
         if radius is None:
-            radius = (hou.Vector3(look_from) - to).length()
-    if radius is not None:
-        camera.setTranslation(hou.Vector3(0, 0, float(radius)))
-        if camera.isOrthographic():
-            camera.setOrthoWidth(float(radius))
+            radius = (hou.Vector3(look_from) - pivot).length()
+    if radius is None:
+        radius = before["radius"]  # keep the distance, around the new pivot
+    camera.setTranslation(pivot + hou.Vector3(0, 0, float(radius)))
+    if camera.isOrthographic():
+        camera.setOrthoWidth(float(radius))
     port.setDefaultCamera(camera)
     port.useDefaultCamera()
+    view = _view(port)
+    if abs(view["radius"] - float(radius)) > 1e-3 * max(1.0, float(radius)) or (
+            look_from is not None and (hou.Vector3(view["look_from"])
+                                       - hou.Vector3(look_from)).length() > 1e-3 * float(radius)):
+        raise RuntimeError(f"The view did not take: asked look_from {look_from} at radius "
+                           f"{radius} around {list(pivot)}, got {view}.")
+    return view
 
 
 def fit(port, what, fill=0.9):
@@ -351,7 +375,8 @@ def fit(port, what, fill=0.9):
     return what
 
 
-def write_image(viewer, port, output=None, resolution=None, frames=None, settle=None):
+def write_image(viewer, port, output=None, resolution=None, frames=None, settle=None,
+                shape=None):
     """Write the viewport to a file, and confirm that the file is new and
     holds more than the background.
 
@@ -382,13 +407,18 @@ def write_image(viewer, port, output=None, resolution=None, frames=None, settle=
     settings.frameRange((start, end))
     settings.output(output)
     settings.outputToMPlay(False)
-    if resolution:
-        # A size of another shape than the viewport stretches the picture, so
-        # the width decides and the height keeps the shape of the viewport.
-        width, height = port.resolutionInPixels()
-        resolution = [int(resolution[0]), max(2, round(int(resolution[0]) * height / width))]
+    # A size of another shape than the view stretches the picture. `shape` is
+    # the (width, height) of what is drawn: a camera's resx and resy, or the
+    # viewport. The width decides and the height keeps that shape. With no
+    # size asked, the stashed settings can hold the user's flipbook size
+    # (often 1280 x 720), so the size is set every time.
+    width, height = shape or port.resolutionInPixels()
+    if resolution or shape:
+        wide = int(resolution[0]) if resolution else int(width)
         settings.useResolution(True)
-        settings.resolution(tuple(resolution))
+        settings.resolution((wide, max(2, round(wide * height / width))))
+    else:
+        settings.useResolution(False)
     before = os.path.getmtime(output) if os.path.exists(output) else None
 
     def written():
@@ -407,9 +437,15 @@ def write_image(viewer, port, output=None, resolution=None, frames=None, settle=
                            f"its display flag and the network the viewer shows."
                            + (f" A renderer such as Karma needs time to draw: give a larger "
                               f"settle than {settle}." if settle else ""))
-    return {"filepath": output,
-            "resolution": resolution or list(port.resolutionInPixels()),
+    return {"filepath": output, "resolution": image_size(output),
             "seconds": round(time.monotonic() - started, 2)}
+
+
+def image_size(path):
+    """[width, height] of the file on disk: the size a caller judges shapes in."""
+    from PySide6.QtGui import QImage
+    image = QImage(path)
+    return [image.width(), image.height()]
 
 
 def blank(path):
@@ -471,8 +507,10 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
             if settle and viewer.pwd().childTypeCategory() == hou.lopNodeTypeCategory():
                 # Camera guides draw over the render.
                 viewer.setShowCameras(False)
+            shape = None
             if camera:
                 yield from look_through(viewer, port, camera)
+                shape = camera_shape(camera)
             if direction:
                 set_viewport_direction(direction)
             if shading:
@@ -499,19 +537,20 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
                             hou.setFrame(number)
                             shot = yield from write_image(
                                 viewer, port, hou.text.expandStringAtFrame(output, number),
-                                resolution, settle=settle)
+                                resolution, settle=settle, shape=shape)
                             images.append({"frame": number, **shot})
                     report = {"images": images, "filepath": output}
                 else:
                     report = yield from write_image(viewer, port, output, resolution,
-                                                    frames=(float(span[0]), float(span[-1])))
+                                                    frames=(float(span[0]), float(span[-1])),
+                                                    shape=shape)
             elif mode == "quad":
                 images = []
                 for name in ("top", "front", "right", "persp"):
                     set_viewport_direction(name)
                     fit(port, frame or (node or "all"), fill)
                     shot = yield from write_image(viewer, port, _numbered(output, name),
-                                                  resolution, settle=settle)
+                                                  resolution, settle=settle, shape=shape)
                     images.append({"view": name, **shot})
                 report = {"images": images, "filepath": images[-1]["filepath"]}
             elif frames is not None:
@@ -521,12 +560,12 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
                         hou.setFrame(number)
                         shot = yield from write_image(viewer, port,
                                                       _numbered(output, f"{number:g}"),
-                                                      resolution, settle=settle)
+                                                      resolution, settle=settle, shape=shape)
                         images.append({"frame": number, **shot})
                 report = {"images": images, "filepath": images[0]["filepath"]}
             else:
                 report = yield from write_image(viewer, port, output, resolution,
-                                                settle=settle)
+                                                settle=settle, shape=shape)
             if aimed or orbited:
                 report["view"] = _view(port)
     report["framed"] = framed
@@ -536,10 +575,3 @@ def capture(mode="viewport", node=None, output=None, camera=None, direction=None
                                     f"{switched['to']} for the picture and went back after.")
     return report
 
-
-# A picture of the network editor is not possible, and this is the reason, so
-# that nobody tries it again: every Houdini pane is a native GL drawable named
-# RE_GLDrawable, not a QOpenGLWidget. QWidget.grab() draws nothing into it and
-# gives a black image, and QScreen.grabWindow takes the pixels of the screen,
-# which hold whatever window sits in front. Houdini 21.0 and 22.0 have no API
-# that writes a pane to a file. Read the graph with node_inspect instead.
