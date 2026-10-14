@@ -15,7 +15,7 @@ import re
 
 import hou
 
-from . import match
+from . import karma, match
 
 
 def _menu(template):
@@ -51,11 +51,14 @@ _COMPARE = {"==": operator.eq, "!=": operator.ne, "<": operator.lt, ">": operato
             "<=": operator.le, ">=": operator.ge}
 
 
-def _term_holds(node, name, op, value):
-    """True or False for one term, None for a form this reader does not know."""
+def _term_holds(node, name, op, value, values=None):
+    """True or False for one term, None for a form this reader does not know.
+    `values` {name: value} replaces the value of those parameters."""
     value = value.strip("\"'")
     function = re.fullmatch(r"hasinput\((\d+)\)", name)
-    if function:
+    if values and name in values:
+        text = number = values[name]
+    elif function:
         index = int(function.group(1))
         inputs = node.inputs()
         text = number = int(index < len(inputs) and inputs[index] is not None)
@@ -76,7 +79,7 @@ def _term_holds(node, name, op, value):
         return _COMPARE[op](str(text), value)
 
 
-def _rule_holds(node, rule):
+def _rule_holds(node, rule, values=None):
     """Whether a Disable When or Hide When rule holds now: (True, the group
     that makes it hold), (False, None), or (None, None) when the rule has a form
     this reader does not know.
@@ -90,7 +93,7 @@ def _rule_holds(node, rule):
         if not terms or _TERM.sub("", group).strip():
             unknown = True
             continue
-        results = [_term_holds(node, *term) for term in terms]
+        results = [_term_holds(node, *term, values) for term in terms]
         if None in results:
             unknown = True
         elif all(results):
@@ -98,7 +101,7 @@ def _rule_holds(node, rule):
     return (None, None) if unknown else (False, None)
 
 
-def state(parm):
+def state(parm, values=None):
     """Whether the cook reads this parameter now, and if not, why.
 
     A disabled or a hidden parameter keeps a value that the cook does not read,
@@ -106,7 +109,9 @@ def state(parm):
     `isHidden` answer only in a graphical session, so the rules are also read
     here, from the values of the parameters that they name. Returns a
     dictionary with "disabled" and "hidden" (the group of the rule that holds),
-    or "disabled_when" and "hidden_when" (a rule this reader cannot decide).
+    or "disabled_when" and "hidden_when" (a rule this reader cannot decide),
+    and "ignored" when the Karma engine does not read it. `values` {name: value}
+    replaces parameters in the rules, for example the engine that really renders.
     """
     found = {}
     template = parm.parmTemplate()
@@ -121,13 +126,17 @@ def state(parm):
             shown = getattr(parm, asked)()
         except hou.OperationFailed:
             shown = False
-        holds, group = _rule_holds(parm.node(), rule) if rule else (False, None)
+        holds, group = _rule_holds(parm.node(), rule, values) if rule else (False, None)
         if shown or holds:
             found[key] = group or rule or "the node state"
         elif holds is None:
             found[f"{key}_when"] = rule
     if template.isHidden():
         found["hidden"] = "the parameter template, always"
+    if "hidden" not in found:
+        reason = karma.ignored(parm, (values or {}).get("engine"))
+        if reason:
+            found["ignored"] = reason
     return found
 
 
@@ -151,6 +160,8 @@ def _state_warnings(found):
         if key in found:
             lines.append(f"this parameter is {word} when {found[key]}, and this tool "
                          f"cannot decide that rule. Read the parameters that it names.")
+    if "ignored" in found:
+        lines.append(f"{found['ignored']}. The value does not change the render.")
     return lines
 
 
@@ -406,7 +417,7 @@ def _notes(parm, target=None, found=None, before=None):
                                    f"{parm.path()}, because this parameter reads it "
                                    f"through a channel reference."))
     found = state(parm) if found is None else found
-    kinds = [key for key in ("disabled", "hidden", "disabled_when", "hidden_when")
+    kinds = [key for key in ("disabled", "hidden", "disabled_when", "hidden_when", "ignored")
              if key in found]
     notes += list(zip(kinds, _state_warnings(found)))
     expanded = _expansion_warning(parm, parm.parmTemplate(), before)

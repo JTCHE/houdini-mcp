@@ -39,7 +39,16 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
                      take a long time.
         "progress" — what the ROP reports about the render.
         "settings" — the output file, the camera, the resolution and the
-                     renderer of the ROP.
+                     range of the ROP; the render delegate that really runs
+                     (`engine` cpu or xpu, and `engine_from`: the ROP
+                     renderer, else husk:default_delegate on the render
+                     settings prim); a warning when a Karma settings node
+                     says another engine; and the changed Karma settings,
+                     split into the ones that engine reads and the ones it
+                     ignores, with the reason. Karma XPU shows the CPU
+                     Quality controls and ignores them; its Limits tab
+                     counts. parm_set and execute warn on a write that the
+                     engine of the node ignores.
         "create"   — make a ROP of `render_type` ("opengl", "karma", "mantra",
                      "ifd", …) named `name` under `parent_path`.
         "watch"    — count the husk and mantra processes on this machine, and
