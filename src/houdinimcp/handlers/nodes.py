@@ -4,7 +4,7 @@ import re
 
 import hou
 
-from . import layout
+from . import layout, match
 from .parameters import inert, matches
 
 
@@ -644,21 +644,36 @@ def find_nodes(pattern, node_type=None, root_path="/"):
     return {"pattern": pattern, "count": len(nodes), "nodes": nodes}
 
 
-def list_node_types(category=None):
-    """List available node types, optionally filtered by category."""
+TYPE_LIMIT = 300
+
+
+def list_node_types(category=None, pattern=None):
+    """The node types of one category whose name or label match `pattern`.
+
+    A category such as Sop holds thousands of types, and a client refuses an
+    answer that holds all of them. Past TYPE_LIMIT the list is cut, and the
+    answer says by how much.
+    """
+    categories = hou.nodeTypeCategories()
+    if category and category not in categories:
+        same = [name for name in categories if name.lower() == category.lower()]
+        if not same:
+            raise ValueError(f"No category '{category}'. Categories: "
+                             f"{', '.join(sorted(categories))}.")
+        category = same[0]
     result = []
-    for cat_name, cat in hou.nodeTypeCategories().items():
+    for cat_name, cat in categories.items():
         if category and cat_name != category:
             continue
         for name, nt in cat.nodeTypes().items():
-            result.append({
-                "name": name,
-                "category": cat_name,
-                "label": nt.description(),
-            })
-        if len(result) >= 500:
-            break
-    return {"count": len(result), "types": result}
+            if match.matches(pattern, name, nt.description()):
+                result.append({"name": name, "category": cat_name,
+                               "label": nt.description()})
+    report = {"count": len(result), "types": result[:TYPE_LIMIT]}
+    if len(result) > TYPE_LIMIT:
+        report["cut"] = (f"Only the first {TYPE_LIMIT} of {len(result)} types. Give "
+                         f"category and pattern, for example pattern='*retarget*|*ik*'.")
+    return report
 
 
 def connect_nodes_batch(connections):

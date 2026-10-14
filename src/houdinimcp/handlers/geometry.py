@@ -10,6 +10,13 @@ import tempfile
 
 import hou
 
+from . import match
+
+# The output of a node that `resolve` reads, by path. A KineFX import puts the
+# mesh on output 0 and the skeletons on 1 and 2. The tool sets it for the
+# duration of one call.
+OUTPUTS = {}
+
 
 def messages(node):
     """What the node itself reports. A warning is as important as an error: a
@@ -46,8 +53,14 @@ def resolve(node_path, frame=None):
         raise ValueError(f"{node_path} is a {node.type().category().name()} node, and it "
                          f"makes no geometry. Read a SOP node, or read a LOP stage with "
                          f"stage_inspect.")
+    index = OUTPUTS.get(node_path, 0)
+    count = len(node.outputNames()) if hasattr(node, "outputNames") else 1
+    if index >= max(count, 1):
+        raise ValueError(f"{node_path} has {count} outputs, so output {index} does not "
+                         f"exist. Outputs: {_output_names(node)}.")
     try:
-        geometry = node.geometryAtFrame(frame) if frame is not None else node.geometry()
+        geometry = (node.geometryAtFrame(frame, index) if frame is not None
+                    else node.geometry(index))
     except hou.OperationFailed as error:
         raise ValueError(f"{node_path} did not cook: {error}. "
                          f"Nodes that report an error: {failure(node)}") from error
@@ -99,7 +112,24 @@ def get_geo_summary(node_path, frame=None):
     volumes = volume_names(geo)
     if volumes:
         report["volumes"] = volumes
+    if len(node.outputNames()) > 1:
+        report["outputs"] = _output_names(node)
+        report["output_read"] = OUTPUTS.get(node_path, 0)
     return _with_messages(node, geo, report)
+
+
+def _output_names(node):
+    """Each output of a node: its index, its label, and its point count."""
+    found = []
+    for index, label in enumerate(node.outputNames()):
+        try:
+            geometry = node.geometry(index)
+            points = len(geometry.points()) if geometry is not None else None
+        except hou.Error:
+            points = None
+        found.append({"output": index, "label": node.outputLabels()[index]
+                      if index < len(node.outputLabels()) else label, "points": points})
+    return found
 
 
 def attribute_line(attribute):
@@ -251,8 +281,12 @@ def get_skeleton(node_path, frame=None, pattern=None):
     node, geo = resolve(node_path, frame)
     named = geo.findPointAttrib("name")
     if not named:
-        raise ValueError(f"{node_path} has no point attribute 'name', so it is not a "
-                         f"skeleton. Read it with mode 'summary'.")
+        others = [index for index in range(len(node.outputNames()))
+                  if index != OUTPUTS.get(node_path, 0) and _has_names(node, index)]
+        hint = (f" Output {', '.join(map(str, others))} of this node holds a skeleton: give "
+                f"output={others[0]}." if others else " Read it with mode 'summary'.")
+        raise ValueError(f"{node_path} output {OUTPUTS.get(node_path, 0)} has no point "
+                         f"attribute 'name', so it is not a skeleton.{hint}")
     names = list(geo.pointStringAttribValues("name"))
     parent_of = {}
     for prim in geo.prims():
@@ -264,7 +298,7 @@ def get_skeleton(node_path, frame=None, pattern=None):
     for point in geo.points():
         number = point.number()
         name = names[number] if number < len(names) else ""
-        if pattern and pattern.lower() not in name.lower():
+        if not match.matches(pattern, name):
             continue
         parent = parent_of.get(number)
         joint = {"point": number, "name": name,
@@ -273,8 +307,21 @@ def get_skeleton(node_path, frame=None, pattern=None):
         if has_transform:
             joint["transform"] = list(point.attribValue("transform"))
         joints.append(joint)
-    return {"path": node_path, "count": len(joints), "roots":
-            [joint["name"] for joint in joints if joint["parent"] is None], "joints": joints}
+    report = {"path": node_path, "count": len(joints), "total_joints": len(geo.points()),
+              "roots": [joint["name"] for joint in joints if joint["parent"] is None],
+              "joints": joints}
+    if pattern and not joints:
+        report["note"] = (f"The pattern {pattern!r} matched none of the {len(geo.points())} "
+                          f"joints. Some names: {', '.join(names[:8])}.")
+    return report
+
+
+def _has_names(node, index):
+    try:
+        geometry = node.geometry(index)
+    except hou.Error:
+        return False
+    return geometry is not None and geometry.findPointAttrib("name") is not None
 
 
 def compare_nodes(node_path, against, match_attrib="name", attribs=None, frame=None,

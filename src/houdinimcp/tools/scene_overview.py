@@ -9,11 +9,11 @@ MODES = ("scene", "network", "children", "search", "node_types", "errors",
 
 
 def run(mode="scene", path=None, pattern=None, node_type=None, category=None,
-        recursive=False):
+        recursive=False, compact=False):
     if mode == "scene":
         return {"scene": scene.get_scene_info(), "summary": context.get_scene_summary()}
     if mode == "network":
-        return context.get_network_overview(path or "/obj")
+        return context.get_network_overview(path or "/obj", pattern, node_type, compact)
     if mode == "children":
         return nodes.list_children(path or "/obj", recursive)
     if mode == "search":
@@ -21,7 +21,7 @@ def run(mode="scene", path=None, pattern=None, node_type=None, category=None,
             raise ValueError("mode 'search' needs a pattern, for example 'geo*'.")
         return nodes.find_nodes(pattern, node_type, path or "/")
     if mode == "node_types":
-        return nodes.list_node_types(category)
+        return nodes.list_node_types(category, pattern)
     if mode == "errors":
         return nodes.find_error_nodes(path or "/obj")
     if mode == "materials":

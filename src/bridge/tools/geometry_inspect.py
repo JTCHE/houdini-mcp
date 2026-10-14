@@ -5,7 +5,7 @@ from mcp.types import ToolAnnotations
 
 from ..connection import call_json
 
-# The scene does not change. Only "export" writes, and only the file at `output`.
+# The scene does not change. Only "export" writes, and only the file at `file`.
 ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
                               openWorldHint=False)
 
@@ -26,7 +26,9 @@ PARAMS = {
     "position": "nearest: [x, y, z].",
     "plane_name": 'image: the COP plane to read, for example "C".',
     "format": 'export: the file type, for example "obj" or "bgeo".',
-    "output": "export: the file path to write.",
+    "file": "export: the file path to write.",
+    "output": "The output of the node to read, 0 by default. A KineFX import has the "
+              "mesh on 0, the rest skeleton on 1, the animated skeleton on 2.",
     "frames": 'Read at other frames, without moving the playbar: one frame, a list, or '
               '{"start": 1001, "end": 1010, "step": 2}. One answer for each frame.',
     "unique": "attrib: return each value that occurs and how many elements carry it. That "
@@ -60,7 +62,7 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
          attrib_class: str = "point", group_name: str = None,
          group_type: str = "point", prim_index: int = 0,
          position: List[float] = None, plane_name: str = "C",
-         format: str = "obj", output: str = None,
+         format: str = "obj", file: str = None, output: Union[int, str] = None,
          frames: Union[float, List[float], Dict[str, float]] = None,
          unique: bool = False, against: str = None, match_attrib: str = "name",
          pattern: str = None, name: str = None, names: List[str] = None,
@@ -95,7 +97,9 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "nearest"        — the point nearest to `position`, for example [0,1,0].
         "skeleton"       — a KineFX skeleton: each joint with its name, its
                            parent and its transform. `pattern` keeps the names
-                           that match.
+                           that match ("|" between alternatives, * as a
+                           wildcard). A KineFX import holds the skeletons on
+                           output 1 and 2: give `output`.
         "compare"        — the difference from the node at `against`. Points are
                            matched by `match_attrib` ("name" by default), not by
                            their order. Use it to prove that a new node gives
@@ -128,7 +132,7 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "image"          — a COP node: resolution, planes, and `plane_name`.
         "volume"         — the VDB grids in a COP node.
         "export"         — write the geometry to disk. `format` is "obj",
-                           "bgeo" or another that Houdini writes, and `output`
+                           "bgeo" or another that Houdini writes, and `file`
                            is the file path. A file that is there is
                            overwritten. The other modes write nothing.
 
@@ -140,7 +144,7 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "attribs": attribs, "attrib_name": attrib_name, "attrib_class": attrib_class,
         "group_name": group_name, "group_type": group_type, "prim_index": prim_index,
         "position": position, "plane_name": plane_name, "format": format,
-        "output": output, "frames": frames, "unique": unique, "against": against,
+        "file": file, "output": output, "frames": frames, "unique": unique, "against": against,
         "match_attrib": match_attrib, "pattern": pattern, "name": name, "names": names,
         "positions": positions, "from_node": from_node, "steps": steps, "bins": bins,
         "limit": limit, "reduce": reduce, "threshold": threshold,

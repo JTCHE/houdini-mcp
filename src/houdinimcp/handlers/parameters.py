@@ -15,6 +15,8 @@ import re
 
 import hou
 
+from . import match
+
 
 def _menu(template):
     """(tokens, labels) of a menu parameter, or (None, None)."""
@@ -568,11 +570,7 @@ def matches(parm, pattern):
     `|` separates alternatives, for example "time|step|cfl". Each one is a
     glob or a part of the name or of the label, with no case.
     """
-    if not pattern:
-        return True
-    name, label = parm.name().lower(), parm.parmTemplate().label().lower()
-    return any(one and (fnmatch.fnmatch(name, one) or one in name or one in label)
-               for one in (part.strip() for part in pattern.lower().split("|")))
+    return match.matches(pattern, parm.name(), parm.parmTemplate().label())
 
 
 def _selected_parms(node, parm=None, pattern=None):

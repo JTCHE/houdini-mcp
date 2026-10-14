@@ -1,24 +1,78 @@
 """Scene context and introspection handlers."""
 import hou
 
+from . import match
 
-def get_network_overview(path="/obj"):
-    """Get an overview of all nodes in a network with their connections."""
-    node = hou.node(path)
-    if not node:
+
+def wire_source(connection):
+    """What feeds one input, by name inside the network.
+
+    `hou.Node.inputs()` gives the node at the far end and hides a dot on the
+    way. A script that reads it and deletes "the input" deletes the wrong node.
+    So the item that is directly wired comes first, and the far node after it.
+    """
+    item = connection.inputItem()
+    far = connection.inputNode()
+    if isinstance(item, hou.NetworkDot):
+        return {"dot": item.name(), "from": far.name() if far else None}
+    if isinstance(item, hou.SubnetIndirectInput):
+        return {"subnet_input": item.number(), "from": far.path() if far else None}
+    return {"from": far.name() if far else None}
+
+
+def _wire_text(name, connection):
+    source = wire_source(connection)
+    via = f" via {source['dot']}" if "dot" in source else (
+        f" via subnet input {source['subnet_input']}" if "subnet_input" in source else "")
+    return f"{source['from']}{via} -> {name}[{connection.inputIndex()}]"
+
+
+def get_network_overview(path="/obj", pattern=None, node_type=None, compact=False):
+    """The nodes of one network and the wires between them, by name.
+
+    Names are relative to the network: the parent path once, not on every
+    line. `pattern` and `node_type` keep some nodes, and a wire is kept when
+    either end is kept. `compact` returns only the wires.
+    """
+    network = hou.node(path)
+    if not network:
         raise ValueError(f"Node not found: {path}")
-    children = node.children()
-    nodes = []
-    for child in children:
-        info = {
-            "name": child.name(),
-            "path": child.path(),
-            "type": child.type().name(),
-            "inputs": [inp.path() for inp in child.inputs() if inp],
-            "outputs": [conn.outputNode().path() for conn in child.outputConnections()],
-        }
+    kept = [child for child in network.children()
+            if match.matches(pattern, child.name())
+            and (not node_type or match.matches(node_type, child.type().name()))]
+    names = {child.name() for child in kept}
+    wires, nodes = [], []
+    for child in network.children():
+        for connection in child.inputConnections():
+            source = connection.inputNode()
+            if child.name() in names or (source is not None and source.name() in names):
+                wires.append(_wire_text(child.name(), connection))
+    if compact:
+        return {"path": path, "node_count": len(kept), "wires": wires}
+    for child in kept:
+        info = {"name": child.name(), "type": child.type().name()}
+        inputs = [{"index": connection.inputIndex(), **wire_source(connection)}
+                  for connection in child.inputConnections()]
+        if inputs:
+            info["inputs"] = inputs
+        readers = sorted({connection.outputNode().name()
+                          for connection in child.outputConnections()
+                          if connection.outputNode() is not None})
+        if readers:
+            info["outputs"] = readers
+        flags = [flag for flag, ask in (("display", "isDisplayFlagSet"),
+                                        ("render", "isRenderFlagSet"),
+                                        ("bypass", "isBypassed"))
+                 if getattr(child, ask, lambda: False)()]
+        if flags:
+            info["flags"] = flags
         nodes.append(info)
-    return {"path": path, "node_count": len(nodes), "nodes": nodes}
+    dots = [{"dot": dot.name(), "from": dot.inputItem().name() if dot.inputItem() else None,
+             "readers": len(dot.outputConnections())} for dot in network.networkDots()]
+    report = {"path": path, "node_count": len(nodes), "nodes": nodes}
+    if dots:
+        report["dots"] = dots
+    return report
 
 
 def get_cook_chain(path):

@@ -13,9 +13,18 @@ MODES = ("summary", "points", "prims", "attrib", "groups", "group_members", "bbo
          "volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export")
 
 
-def run(path, mode="summary", frames=None, **options):
+def run(path, mode="summary", frames=None, output=None, **options):
     """Read one node, or each node of a list. Every result of a list names
-    its path, and a node that fails does not stop the others."""
+    its path, and a node that fails does not stop the others. `output` is the
+    output of `path` to read."""
+    if output not in (None, "", 0, "0"):
+        index = int(output)
+        geometry.OUTPUTS.update({one: index for one in
+                                 ([path] if isinstance(path, str) else path)})
+        try:
+            return run(path, mode, frames, None, **options)
+        finally:
+            geometry.OUTPUTS.clear()
     if isinstance(path, str):
         return _read(path, mode, frames, options)
     results = []
@@ -105,5 +114,5 @@ def _one(path, mode, options, frame=None):
     if mode == "volume":
         return cops.get_cop_vdb(path)
     if mode == "export":
-        return geometry.geo_export(path, want("format", "obj"), want("output"), frame)
+        return geometry.geo_export(path, want("format", "obj"), want("file"), frame)
     raise unknown_mode(mode, MODES)
