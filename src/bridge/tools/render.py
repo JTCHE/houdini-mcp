@@ -36,9 +36,6 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
          reference: str = None) -> str:
     """Start a render, read its settings, or watch it run.
 
-    Modes: "start", "progress", "settings", "create", "watch", "stats",
-    "compare".
-
     Use it for a final picture through a ROP node. For a fast look at the
     viewport, use capture instead: it is much quicker.
 

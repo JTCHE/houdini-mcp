@@ -12,6 +12,7 @@ import functools
 import importlib
 import inspect
 import pkgutil
+import re
 from typing import Optional
 
 from mcp.server.mcpserver.exceptions import ToolError
@@ -30,6 +31,7 @@ def build() -> list:
         module = importlib.import_module(f"{__name__}.{name}")
         tool = Tool.from_function(_guarded(module.tool), name=name,
                                   annotations=module.ANNOTATIONS)
+        tool.description = _with_modes(name, tool.description, module)
         # An argument that the tool does not take is refused, not dropped: a
         # dropped filter returns everything and reads as a filter that matched.
         model = tool.fn_metadata.arg_model
@@ -57,6 +59,25 @@ def build() -> list:
             key: getattr(tool.fn_metadata, key) for key in FuncMetadata.model_fields})
         TOOLS[name] = tool
     return list(TOOLS.values())
+
+
+def _with_modes(name, description, module):
+    """The description with the names of all modes after its first paragraph.
+
+    A client can cut a long description, and the modes come last in it, so an
+    agent did not know that a mode exists and wrote a script for it.
+    """
+    key = "mode" if "mode" in module.PARAMS else "action"
+    modes = re.findall(r'"(\w+)"', module.PARAMS.get(key, ""))
+    if not modes:
+        return description
+    documented = re.findall(r'^\s+"(\w+)"\s*—', description, re.M)
+    if set(modes) != set(documented):
+        raise RuntimeError(f"{name}: PARAMS['{key}'] names {modes}, the docstring documents "
+                           f"{documented}.")
+    first, _, rest = description.partition("\n\n")
+    indent = rest[:len(rest) - len(rest.lstrip(" "))]
+    return f"{first}\n\n{indent}{key.title()}s: {', '.join(modes)}.\n\n{rest}"
 
 
 class _Metadata(FuncMetadata):

@@ -15,7 +15,7 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempot
                               openWorldHint=False)
 
 PARAMS = {
-    "mode": 'One of "viewport", "quad", "camera", "flipbook", "sheet", "movie".',
+    "mode": 'One of "viewport", "quad", "camera", "flipbook", "sheet", "movie", "network".',
     "node": "The node to look at. It gets the display flag for the picture, and the flag "
             "goes back after. The viewer shows its network, and goes back after. Without "
             "`frame`, the view also frames it.",
@@ -93,9 +93,6 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
          azimuths: List[float] = None, bounds: List[float] = None,
          paths: List[str] = None) -> list[Image | str]:
     """Make a picture of the scene, or of the network editor, and look at it.
-
-    Modes: "viewport", "quad", "camera", "flipbook", "sheet", "movie",
-    "network".
 
     Use it to confirm your own work: numbers in a node do not tell you that the
     result looks wrong. Use it before you report that a task is done.
