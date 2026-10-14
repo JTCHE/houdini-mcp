@@ -13,13 +13,18 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                               idempotentHint=False, openWorldHint=False)
 
 PARAMS = {
-    "mode": 'One of "start", "progress", "settings", "create", "watch".',
+    "mode": 'One of "start", "progress", "settings", "create", "watch", "stats", "compare".',
     "path": "start, progress, settings: the ROP node.",
-    "frame_range": "start: [start, end]. Without it the ROP renders its own range.",
+    "frame_range": "start: [start, end] or [start, end, step]. Without it the ROP renders "
+                   "its own range.",
+    "res_scale": "start: a fraction of the resolution for this render only, 0.5 is half.",
+    "wait": "start: return when every image is complete, with its render stats.",
+    "reference": "compare: the image to compare `output_path` with.",
     "render_type": 'create: the ROP kind, for example "opengl", "karma", "mantra" or "ifd".',
     "name": "create: the name of the new ROP.",
     "parent_path": "create: the network that gets the ROP.",
-    "output_path": "watch: the image file to look for on disk.",
+    "output_path": "start: the image file for this render only (put $F4 in it for a range). "
+                   "watch, stats, compare: the image file.",
 }
 
 PROCESS_NAMES = ("husk", "mantra-bin")
@@ -27,16 +32,25 @@ PROCESS_NAMES = ("husk", "mantra-bin")
 
 def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
          render_type: str = "opengl", name: str = None, parent_path: str = "/out",
-         output_path: str = None) -> str:
+         output_path: str = None, res_scale: float = None, wait: bool = False,
+         reference: str = None) -> str:
     """Start a render, read its settings, or watch it run.
+
+    Modes: "start", "progress", "settings", "create", "watch", "stats",
+    "compare".
 
     Use it for a final picture through a ROP node. For a fast look at the
     viewport, use capture instead: it is much quicker.
 
     mode:
         "start"    — render the ROP at `path`. `frame_range` is [start, end];
-                     without it the node renders its own range. A render can
-                     take a long time.
+                     without it the node renders its own range. `output_path`
+                     and `res_scale` hold for this render only: the ROP keeps
+                     the output and the size of the user. Use them for test
+                     renders. `wait=true` returns when every image is
+                     complete (husk ended; up to about 28 minutes), with the
+                     render stats of the last one. Without wait, husk can go
+                     on after the call.
         "progress" — what the ROP reports about the render.
         "settings" — the output file, the camera, the resolution and the
                      range of the ROP; the render delegate that really runs
@@ -55,6 +69,14 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
                      say whether the file at `output_path` is there and how big
                      it is. This mode does not need Houdini, so it also works
                      while Houdini is busy with the render.
+        "stats"    — what husk wrote into the image at `output_path`
+                     (husk:render_stats): render time, the engine that really
+                     ran, each XPU device with its share of the samples,
+                     shader compiles, peak memory, the AOVs. A GPU at 0 %
+                     with compiles in progress is not a slow GPU.
+        "compare"  — the mean and the largest absolute difference of each AOV
+                     of `output_path` against `reference`, to tune samples
+                     against a clean render.
 
     Returns JSON. A render that writes no file, with no process running, has
     failed: read the node with cook to see the error.
@@ -64,7 +86,9 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
     return call_json("render", {"mode": mode, "path": path,
                                 "frame_range": frame_range,
                                 "render_type": render_type, "name": name,
-                                "parent_path": parent_path}, timeout=1800.0)
+                                "parent_path": parent_path, "output_path": output_path,
+                                "res_scale": res_scale, "wait": wait,
+                                "reference": reference}, timeout=1800.0)
 
 
 def _watch(output_path):

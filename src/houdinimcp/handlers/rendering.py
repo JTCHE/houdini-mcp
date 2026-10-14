@@ -1,5 +1,9 @@
 """ROP nodes: list them, read and write their settings, and start a render."""
 
+import json
+import os
+import time
+
 import hou
 
 from . import karma, parameters
@@ -172,8 +176,73 @@ def create_render_node(render_type="opengl", name=None, parent_path="/out"):
 _gl_rendered = False
 
 
-def start_render(path, frame_range=None):
-    """Start a render from a ROP node."""
+# The parameter that names the image, by ROP type: USD Render, Karma and
+# OpenGL, Mantra, Composite.
+OUTPUT_PARMS = ("outputimage", "picture", "vm_picture", "copoutput")
+# How long a call waits for the images. The bridge gives up at 1800 s.
+WAIT_LIMIT = 1700.0
+
+
+def _output_parm(node):
+    return next((node.parm(name) for name in OUTPUT_PARMS if node.parm(name) is not None), None)
+
+
+def _frames(node, frame_range):
+    """The frames that a render of `node` writes."""
+    if frame_range:
+        start, end = frame_range[0], frame_range[1]
+        step = frame_range[2] if len(frame_range) > 2 else 1
+    elif node.parm("trange") is not None and node.evalParm("trange") != 0:
+        start, end, step = (node.evalParm(name) for name in ("f1", "f2", "f3"))
+    else:
+        return [hou.frame()]
+    count = int(round((end - start) / (step or 1))) + 1
+    return [start + index * step for index in range(max(count, 1))]
+
+
+def _scale_values(node, res_scale):
+    """{parameter: value} that make `node` render at `res_scale` of its size."""
+    if node.parm("override_res") is not None and node.parm("res_scale") is not None:
+        return {"override_res": "scale", "res_scale": res_scale * 100.0}
+    if node.parm("override_camerares") is not None and node.parm("res_fraction") is not None:
+        tokens = node.parm("res_fraction").parmTemplate().menuItems()
+        for token in tokens:
+            try:
+                if abs(float(token) - res_scale) < 1e-3:
+                    return {"override_camerares": 1, "res_fraction": token}
+            except ValueError:
+                continue
+        raise ValueError(f"res_scale on a Karma ROP must be one of its fractions: "
+                         f"{[token for token in tokens if token[:1].isdigit()]}.")
+    raise ValueError(f"{node.path()} ({node.type().name()}) has no resolution scale. "
+                     f"res_scale works on a USD Render ROP and a Karma ROP.")
+
+
+def _hold(parms):
+    """What `parms` hold now, keyframes included, to put back after."""
+    held = []
+    for parm in parms:
+        keys = parm.keyframes()
+        text = parm.parmTemplate().type() == hou.parmTemplateType.String
+        held.append((parm, keys, None if keys else
+                     (parm.unexpandedString() if text else parm.eval())))
+    return held
+
+
+def _put_back(held):
+    for parm, keys, value in held:
+        parm.deleteAllKeyframes()
+        if keys:
+            parm.setKeyframes(keys)
+        else:
+            parm.set(value)
+
+
+def start_render(path, frame_range=None, output_path=None, res_scale=None, wait=False):
+    """Render a ROP node. `output_path` and `res_scale` hold for this render
+    only: the ROP gets its own values back when render() returns, which is
+    after husk got its command line. With `wait`, a generator that returns when
+    every image is complete, with a summary of husk:render_stats."""
     global _gl_rendered
     node = hou.node(path)
     if not node:
@@ -189,11 +258,174 @@ def start_render(path, frame_range=None):
                 "Render the whole range in one call, or use capture (it draws in a "
                 "new hython).")
         _gl_rendered = True
-    if frame_range and len(frame_range) == 2:
-        node.render(frame_range=(frame_range[0], frame_range[1]))
-    else:
-        node.render()
-    return {"path": path, "rendering": True}
+    frames = _frames(node, frame_range)
+    output = _output_parm(node)
+    values = _scale_values(node, res_scale) if res_scale else {}
+    if output_path:
+        if output is None:
+            raise ValueError(f"{node.path()} has none of the output parameters {OUTPUT_PARMS}.")
+        if len(frames) > 1 and "$F" not in output_path:
+            raise ValueError(f"{len(frames)} frames would all write {output_path}. Put $F4 in "
+                             f"output_path.")
+        values[output.name()] = output_path
+    held = _hold([node.parm(name) for name in values])
+    started = time.time()
+    try:
+        for name, value in values.items():
+            node.parm(name).deleteAllKeyframes()
+            node.parm(name).set(value)
+        files = [output.evalAtFrame(frame) for frame in frames] if output else []
+        files = [os.path.abspath(one) for one in files if one]
+        if frame_range:
+            node.render(frame_range=(frames[0], frames[-1],
+                                     frames[1] - frames[0] if len(frames) > 1 else 1))
+        else:
+            node.render()
+    finally:
+        _put_back(held)
+    report = {"path": path, "frames": [frames[0], frames[-1]],
+              "files": files[:3] + ([f"... {len(files) - 3} more"] if len(files) > 3 else [])}
+    if values:
+        report["for_this_render_only"] = values
+    if not wait:
+        report["note"] = ("The render can go on in husk after this call. Use wait=true, or "
+                          "render mode 'watch' with the file.")
+        return report
+    if not files:
+        raise ValueError(f"wait needs the image file, and {node.path()} names none. Give "
+                         f"output_path.")
+    return _waited(report, files, started)
+
+
+def _waited(report, files, started):
+    deadline = time.time() + WAIT_LIMIT
+    while not all(_complete(one, started) for one in files):
+        if time.time() > deadline:
+            report["done"] = False
+            report["note"] = (f"Not complete after {WAIT_LIMIT:.0f} s. Call render mode "
+                              f"'watch' with the file, or start again with wait.")
+            return report
+        yield 2.0, None
+    report["done"] = True
+    report["seconds"] = round(time.time() - started, 1)
+    stats = render_stats(files[-1])
+    if stats:
+        report["render_stats"] = stats
+    return report
+
+
+def _complete(path, started):
+    """True when the image at `path` is written by this render and is final.
+    Karma writes a snapshot while it renders; its stats say when it is done."""
+    if not os.path.exists(path) or os.path.getmtime(path) < started - 1:
+        return False
+    raw = _raw_stats(path)
+    if raw is None:
+        return time.time() - os.path.getmtime(path) > 2
+    return (raw.get("percent_complete") or 0) >= 100
+
+
+def _raw_stats(path):
+    """husk:render_stats of an image as a dictionary, or None."""
+    try:
+        import OpenImageIO
+        image = OpenImageIO.ImageInput.open(path)
+        if not image:
+            return None
+        try:
+            text = image.spec().getattribute("husk:render_stats")
+            seconds = image.spec().getattribute("renderTime")
+        finally:
+            image.close()
+        if not text:
+            return None
+        raw = json.loads(text)
+        raw["__seconds"] = seconds
+        return raw
+    except (ImportError, ValueError, OSError):
+        return None
+
+
+def render_stats(path):
+    """The facts that matter in husk:render_stats: time, engine, devices and
+    their share, shader compiles, memory, AOVs. None without the field."""
+    raw = _raw_stats(path)
+    if raw is None:
+        return None
+    stats = {"engine": raw.get("engine"), "delegate": raw.get("__delegate"),
+             "render_seconds": raw.get("__seconds") or
+             (raw.get("system_time") or {}).get("wallclock"),
+             "time_to_first_pixel": raw.get("ttfp"),
+             "percent_complete": raw.get("percent_complete"),
+             "resolution": raw.get("resolution"), "camera": raw.get("render_camera"),
+             "peak_memory_mb": round(((raw.get("system_memory") or {}).get("peak") or 0)
+                                     / 2 ** 20),
+             "aovs": [one.get("name") for one in raw.get("aov_buffers") or []]}
+    devices = [{"name": one.get("xpu_device_label"), "type": one.get("xpu_device_type"),
+                "share_percent": one.get("xpu_device_contrib"),
+                "samples": one.get("xpu_device_samples"),
+                **({"error": one["xpu_device_error"]} if one.get("xpu_device_error") else {})}
+               for one in raw.get("xpu_devices") or []]
+    if devices:
+        stats["devices"] = devices
+    compiles = raw.get("xpu_compiles")
+    if compiles:
+        stats["shader_compiles"] = {"count": compiles.get("count"),
+                                    "shaders": compiles.get("count_shader"),
+                                    "kernels": compiles.get("count_kernel"),
+                                    "average_seconds": compiles.get("avg_time"),
+                                    "longest_seconds": compiles.get("max_time"),
+                                    "still_running": compiles.get("active")}
+    idle = [one["name"] for one in devices
+            if one["type"] != "EmbreeCPU" and not one["share_percent"]]
+    if idle:
+        compiling = compiles and (compiles.get("count") or compiles.get("active"))
+        stats["warning"] = (f"{', '.join(idle)} did 0 % of the samples. " + (
+            "XPU compiled shaders and kernels during this render, and while it compiles the "
+            "CPU device renders alone. Render again: the compiles are cached."
+            if compiling else
+            "The render ended before the GPU started; a render this short says nothing "
+            "about the speed of XPU."))
+    return stats
+
+
+def compare_images(path, reference):
+    """The mean absolute difference of each AOV of two images."""
+    import numpy
+    import OpenImageIO
+
+    def read(one):
+        image = OpenImageIO.ImageInput.open(one)
+        if not image:
+            raise ValueError(f"Cannot read {one}: {OpenImageIO.geterror()}")
+        try:
+            return list(image.spec().channelnames), image.read_image("float")
+        finally:
+            image.close()
+
+    names, pixels = read(path)
+    reference_names, reference_pixels = read(reference)
+    if pixels.shape[:2] != reference_pixels.shape[:2]:
+        raise ValueError(f"The sizes differ: {pixels.shape[1]} x {pixels.shape[0]} and "
+                         f"{reference_pixels.shape[1]} x {reference_pixels.shape[0]}.")
+    groups = {}
+    for index, name in enumerate(names):
+        groups.setdefault(name.rsplit(".", 1)[0] if "." in name else "C", []).append(index)
+    aovs, missing = {}, []
+    for aov, indices in groups.items():
+        other = [reference_names.index(names[i]) if names[i] in reference_names else None
+                 for i in indices]
+        if None in other:
+            missing.append(aov)
+            continue
+        difference = numpy.abs(pixels[..., indices] - reference_pixels[..., other])
+        aovs[aov] = {"mean_abs_difference": float(difference.mean()),
+                     "max_abs_difference": float(difference.max()),
+                     "reference_mean": float(numpy.abs(reference_pixels[..., other]).mean())}
+    report = {"path": path, "reference": reference, "aovs": aovs}
+    if missing:
+        report["not_in_reference"] = missing
+    return report
 
 
 def get_render_progress(path):
