@@ -47,15 +47,52 @@ class Arguments(dict):
     def __init__(self, mode, values):
         super().__init__(values)
         self.mode = mode
+        self.read = {"mode"}
 
     def __missing__(self, key):
         raise ValueError(f"mode '{self.mode}' needs the argument '{key}'.")
 
+    def __getitem__(self, key):
+        self.read.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self.read.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        self.read.add(key)
+        return super().__contains__(key)
+
+    def unread(self):
+        """The arguments that the mode did not look at. A call that gives one
+        expects an effect that did not happen."""
+        return sorted(key for key in self.keys() if key not in self.read)
+
 
 def items_of(mode, items, defaults):
-    """One item or a list of them, each merged over the defaults."""
-    return ([Arguments(mode, {**defaults, **item}) for item in as_list(items)]
+    """One item or a list of them, each merged over the defaults. An item can
+    carry its own `mode`; the mode of the call is the default."""
+    return ([Arguments(item.get("mode", mode), {**defaults, **item}) for item in as_list(items)]
             or [Arguments(mode, defaults)])
+
+
+def run_items(mode, items, defaults, one):
+    """Run one(mode, arguments) for each item. A failed item keeps its error,
+    and an argument that the mode did not read is reported, not ignored."""
+    results = []
+    for arguments in items_of(mode, items, defaults):
+        try:
+            result = one(arguments.mode, arguments)
+        except Exception as error:
+            result = {"error": f"{type(error).__name__}: {error}", "item": dict(arguments)}
+        unread = arguments.unread()
+        if unread and isinstance(result, dict) and "error" not in result:
+            result["ignored_arguments"] = (
+                f"mode '{arguments.mode}' does not read {', '.join(unread)}; "
+                f"they had no effect.")
+        results.append(result)
+    return results[0] if len(results) == 1 else {"count": len(results), "results": results}
 
 
 def unknown_mode(mode, known):

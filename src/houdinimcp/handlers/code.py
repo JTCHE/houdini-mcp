@@ -40,77 +40,151 @@ class _Live(io.StringIO):
 
 
 class _Writes:
-    """Watch the parameter writes of a script.
+    """Watch what a script changes.
 
     A script writes parameters with `hou.Parm.set`, `hou.ParmTuple.set` and
     `hou.OpNode.setParms`, and Houdini reports none of the writes that change
-    nothing or change another node. While the script runs, these three calls
-    go through a wrapper that keeps one line for each such write.
+    nothing or change another node. While the script runs, these calls go
+    through a wrapper that keeps each write. The checks run when the script
+    ends, so a write that a later line of the script makes valid (a toggle
+    that enables it) is not reported.
 
     The creation script of a new node writes its own parameters. Those writes
     are not the script's, so they are not reported.
+
+    The wrapper also counts the nodes and the wires that the script makes, and
+    the nodes that get new spare parameters.
     """
 
     def __enter__(self):
-        self.notes = {}
+        self.writes = {}
         self.creating = 0
+        self.created = self.wired = 0
+        self.spare_nodes = {}
         self.saved = (hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms,
-                      hou.Node.createNode)
-        parm_set, tuple_set, set_parms, create_node = self.saved
-        note = self.note
+                      hou.Node.createNode, hou.Node.setInput,
+                      hou.OpNode.setParmTemplateGroup, hou.OpNode.addSpareParmTuple)
+        (parm_set, tuple_set, set_parms, create_node, set_input, set_group,
+         add_spare) = self.saved
+        record = self.record
 
         def watched_create_node(node, *rest, **named):
+            if not self.creating:
+                self.created += 1
             self.creating += 1
             try:
                 return create_node(node, *rest, **named)
             finally:
                 self.creating -= 1
 
+        def watched_set_input(node, *rest, **named):
+            if not self.creating:
+                self.wired += 1
+            return set_input(node, *rest, **named)
+
+        def watched_set_group(node, *rest, **named):
+            if not self.creating:
+                self.spare_nodes[node.path()] = node
+            return set_group(node, *rest, **named)
+
+        def watched_add_spare(node, *rest, **named):
+            if not self.creating:
+                self.spare_nodes[node.path()] = node
+            return add_spare(node, *rest, **named)
+
         def watched_parm_set(parm, value, *rest, **named):
+            before = parameters._text(parm)
             target = parameters._referenced(parm)
             result = parm_set(parm, value, *rest, **named)
-            note(parm, value, target)
+            record(parm, value, target, before)
             return result
 
         def watched_tuple_set(parm_tuple, values, *rest, **named):
+            befores = [parameters._text(parm) for parm in parm_tuple]
             targets = [parameters._referenced(parm) for parm in parm_tuple]
             result = tuple_set(parm_tuple, values, *rest, **named)
-            for parm, value, target in zip(parm_tuple, values, targets):
-                note(parm, value, target)
+            for parm, value, target, before in zip(parm_tuple, values, targets, befores):
+                record(parm, value, target, before)
             return result
 
         def watched_set_parms(node, values, *rest, **named):
             parms = {name: node.parm(name) for name in values}
             targets = {name: parm and parameters._referenced(parm)
                        for name, parm in parms.items()}
+            befores = {name: parm and parameters._text(parm) for name, parm in parms.items()}
             result = set_parms(node, values, *rest, **named)
             for name, parm in parms.items():
                 if parm:
-                    note(parm, values[name], targets[name])
+                    record(parm, values[name], targets[name], befores[name])
             return result
 
         hou.Parm.set, hou.ParmTuple.set = watched_parm_set, watched_tuple_set
         hou.OpNode.setParms = watched_set_parms
-        hou.Node.createNode = watched_create_node
+        hou.Node.createNode, hou.Node.setInput = watched_create_node, watched_set_input
+        hou.OpNode.setParmTemplateGroup = watched_set_group
+        hou.OpNode.addSpareParmTuple = watched_add_spare
         return self
 
-    def note(self, parm, value, target):
-        # ponytail: checks every write; a loop of many thousand writes pays for
-        # it, so cache per parameter path if that shows up.
-        if self.creating:
-            return
-        try:
-            line = parameters.script_write_note(parm, value, target)
-        except hou.Error:
-            return
-        if line:
-            self.notes[parm.path()] = line
-        else:
-            self.notes.pop(parm.path(), None)
+    def record(self, parm, value, target, before):
+        if not self.creating:
+            # The last write to each parameter decides.
+            self.writes[parm.path()] = (parm, value, target, before)
 
     def __exit__(self, *error):
-        hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms, hou.Node.createNode =             self.saved
+        (hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms, hou.Node.createNode,
+         hou.Node.setInput, hou.OpNode.setParmTemplateGroup,
+         hou.OpNode.addSpareParmTuple) = self.saved
         return False
+
+    def notes(self):
+        """[(kind, line)] for each write that changed nothing or something else,
+        read now that the script has ended."""
+        found = []
+        for parm, value, target, before in self.writes.values():
+            try:
+                found += parameters.script_write_notes(parm, value, target, before)
+            except Exception:
+                continue  # the parameter or its node went away
+        return found
+
+    def folded(self):
+        """Put the spare parameters that the script added to a wrangle into the
+        folder that the Create Parameters button makes. The script appended them
+        at the bottom, below the code, where the user does not look."""
+        from . import spares
+        moved = {}
+        for path, node in self.spare_nodes.items():
+            try:
+                names = spares.fold_spares(node)
+            except Exception:
+                continue
+            if names:
+                moved[path] = names
+        return moved
+
+
+# A script that builds a network has a named way that reports each error.
+BUILD_NOTE = ("This script made {created} nodes and {wired} wires. Build a network with "
+              "one batch of node_edit create, connect and parm_set (mode 'spare' for "
+              "wrangle controls): it is one round trip too, each step reports its "
+              "errors, and a failed step changes nothing.")
+
+WARNING_LIMIT = 12
+
+
+def _grouped(notes):
+    """The write warnings, short enough to read. A script that copies every
+    parameter of a node gives hundreds; past the limit they are grouped by
+    kind, with a count and the first names."""
+    if len(notes) <= WARNING_LIMIT:
+        return [line for _, line in notes]
+    kinds = {}
+    for kind, line in notes:
+        entry = kinds.setdefault(kind, {"count": 0, "parms": [], "example": line})
+        entry["count"] += 1
+        if len(entry["parms"]) < 5:
+            entry["parms"].append(line.split(": ", 1)[0])
+    return {"count": len(notes), "by_kind": kinds}
 
 
 def execute_code(code, allow_dangerous=True, file=None, globals=None, args=None,
@@ -170,10 +244,18 @@ def execute_code(code, allow_dangerous=True, file=None, globals=None, args=None,
         report["file"] = file
     if globals:
         report["globals"] = sorted(globals)
-    if writes.notes:
-        # The last write to each parameter decides, so a write that a later
-        # one repairs is not listed.
-        report["write_warnings"] = list(writes.notes.values())
+    notes = writes.notes()
+    if notes:
+        report["write_warnings"] = _grouped(notes)
+    folded = writes.folded()
+    if folded:
+        report["spare_parameters_moved"] = {
+            "nodes": folded,
+            "note": "The script put these controls at the bottom of the wrangle. They are now "
+                    "in the folder above the code, where Create Parameters puts them. Use "
+                    "parm_set mode 'spare' next time: it does this itself."}
+    if writes.created and writes.wired:
+        report["named_tools"] = BUILD_NOTE.format(created=writes.created, wired=writes.wired)
     if stopped:
         report["stopped"] = (f"{stopped}. What the script changed before it stopped stays "
                              f"in the scene. Give a larger timeout, or background=true, "

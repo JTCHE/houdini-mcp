@@ -37,7 +37,10 @@ def run(operations):
             f"Undo is off in this session, so the steps before step {report['stopped_at']} stay.")
         report["undone_groups"] = undone
     else:
-        report["check"] = _check(report["results"])
+        try:
+            report["check"] = _check(report["results"])
+        except Exception as error:  # every step applied: a failed check is not a failed batch
+            report["check"] = {"error": f"{type(error).__name__}: {error}"}
     return report
 
 
@@ -125,15 +128,25 @@ def _check(results):
         if display is None:
             networks[path] = {"display": None}
             continue
+        # The check reports; it must never fail a batch whose steps all applied.
         try:
             geometry = display.geometry()
+            if geometry is None:
+                # A display node inside a DOP SOP solver has no geometry
+                # outside the simulation.
+                networks[path] = {"display": display.path(), "geometry": None}
+            else:
+                networks[path] = {"display": display.path(),
+                                  "points": geometry.intrinsicValue("pointcount"),
+                                  "prims": geometry.intrinsicValue("primitivecount")}
+        except Exception as error:
             networks[path] = {"display": display.path(),
-                              "points": geometry.intrinsicValue("pointcount"),
-                              "prims": geometry.intrinsicValue("primitivecount")}
-        except hou.Error as error:
-            networks[path] = {"display": display.path(), "cook_error": str(error)}
+                              "cook_error": f"{type(error).__name__}: {error}"}
     for path, node in nodes.items():
-        found = node.errors()
+        try:
+            found = node.errors()
+        except Exception:
+            continue
         if found:
             errors[path] = list(found)
     return {"networks": networks, "node_errors": errors}

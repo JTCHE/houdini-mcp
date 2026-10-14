@@ -6,7 +6,7 @@ disables or hides, a strict range that clamps the value, a bit field written
 by its token, and a channel reference, which sends the value to another node.
 One function, `_write`, looks for all of them, so every path that writes a
 parameter reports the same truth. `execute` reports the same through
-`script_write_note`.
+`script_write_notes`.
 """
 import difflib
 import fnmatch
@@ -256,18 +256,19 @@ def _took(parm, value, tokens):
     return False
 
 
-def _write(node, parm_name, value, follow_reference=False):
+def _write(node, parm_name, value, follow_reference=False, check_state=True):
     """Write one parameter and report what really happened."""
     parm = node.parm(parm_name)
     if not parm:
         tuple_parm = node.parmTuple(parm_name)
         if tuple_parm and isinstance(value, (list, tuple)):
-            return _write_tuple(tuple_parm, value, follow_reference)
+            return _write_tuple(tuple_parm, value, follow_reference, check_state)
         return {"parm": parm_name, "applied": False, "reason": _no_such(node, parm_name)}
 
     template = parm.parmTemplate()
     tokens, _labels = _menu(template)
     report = {"parm": parm_name, "old": parm.eval()}
+    before = _text(parm)
     bits = _bits(template)
     if bits and isinstance(value, (str, list, tuple)):
         try:
@@ -285,9 +286,17 @@ def _write(node, parm_name, value, follow_reference=False):
                           f"{target.path()}, or write that parameter by its own path."}
 
     expression = _expression(parm)
-    # Houdini counts an expression as one keyframe, so ask for keys only when
-    # there is no expression. Otherwise every expression reads as animation.
-    keyframes = parm.keyframes() if not expression else ()
+    keys = parm.keyframes()
+    # Houdini counts an expression as one keyframe. A lone expression, such as
+    # the $F default of a Time Shift, gives way to the value: left in place it
+    # can eval to the value at this frame and to another value at every other
+    # frame. Real animation (several keys) keeps its keys.
+    replaced = None
+    if expression and len(keys) <= 1:
+        replaced = expression
+        parm.deleteAllKeyframes()
+        expression, keys = None, ()
+    keyframes = keys if not expression else ()
     try:
         parm.set(value)
     except hou.PermissionError as error:
@@ -300,6 +309,13 @@ def _write(node, parm_name, value, follow_reference=False):
     report["new"] = parm.eval()
     report["raw"] = parm.rawValue()
     report["applied"] = _took(parm, value, tokens)
+    if replaced:
+        report["replaced_expression"] = replaced
+    left = _expression(parm)
+    if left and not keyframes and report["applied"]:
+        # The value matches only at this frame; the expression still decides.
+        report["applied"] = False
+        expression = left
     if tokens:
         report["menu_tokens"] = tokens
     warnings = []
@@ -318,12 +334,21 @@ def _write(node, parm_name, value, follow_reference=False):
     elif clamped:
         warnings.append(clamped)
 
-    found = state(parm)
-    report.update({f"{key}_by": found[key] for key in ("disabled", "hidden") if key in found})
-    warnings += write_notes(parm, target, found)
+    if check_state:
+        warnings += state_notes(parm, report)
+    warnings += [text for _, text in _notes(parm, target, {}, before)]
     if warnings:
         report["warnings"] = warnings
     return report
+
+
+def state_notes(parm, report):
+    """Add to `report` what disables or hides `parm` now, and return the
+    warnings. Run it after every write of a call: a toggle that the same call
+    turns on enables the parameters after it."""
+    found = state(parm)
+    report.update({f"{key}_by": found[key] for key in ("disabled", "hidden") if key in found})
+    return _state_warnings(found)
 
 
 def _refused_reason(parm, template, tokens, value):
@@ -348,8 +373,7 @@ def _bit_sum(bits, value):
 
 
 def _range_note(template, asked, now):
-    """What a range did to a number that was written: the clamp of a strict
-    range, or a value past the slider, which Houdini keeps. None when neither."""
+    """The clamp of a strict range on a number that was written, or None."""
     if not hasattr(template, "minValue") or isinstance(asked, bool) \
             or not isinstance(asked, (int, float)):
         return None
@@ -357,73 +381,90 @@ def _range_note(template, asked, now):
     if (template.minIsStrict() and asked < low) or (template.maxIsStrict() and asked > high):
         return (f"Houdini clamped {asked} to {now}: this parameter accepts only "
                 f"{low} to {high}. Values past that end all give the same result.")
-    if asked < low or asked > high:
-        return (f"{asked} is past the slider range {low} to {high}. Houdini kept it, "
-                f"because that range is only a slider limit, but the node was not tuned "
-                f"for it.")
+    # A value past a soft slider range is kept, and it is often normal (a
+    # focal length, a frame number), so it is not reported.
     return None
 
 
-def write_notes(parm, target=None, found=None):
-    """The warnings after a write to `parm` that the write itself cannot show:
-    the node it really changed, a state that makes the cook ignore it, and
-    text that Houdini expands."""
+def _text(parm):
+    try:
+        return parm.unexpandedString()
+    except hou.OperationFailed:
+        return None
+
+
+def _notes(parm, target=None, found=None, before=None):
+    """[(kind, sentence)] after a write to `parm` that the write itself cannot
+    show: the node it really changed, a state that makes the cook ignore it,
+    and text that Houdini expands. `found` is the state, read when None.
+    `before` is the text the parameter held before the write."""
     notes = []
     if target:
-        notes.append(f"the value went to {target.path()}, not to {parm.path()}, because "
-                     f"this parameter reads it through a channel reference.")
-    notes += _state_warnings(state(parm) if found is None else found)
-    expanded = _expansion_warning(parm, parm.parmTemplate())
+        notes.append(("reference", f"the value went to {target.path()}, not to "
+                                   f"{parm.path()}, because this parameter reads it "
+                                   f"through a channel reference."))
+    found = state(parm) if found is None else found
+    kinds = [key for key in ("disabled", "hidden", "disabled_when", "hidden_when")
+             if key in found]
+    notes += list(zip(kinds, _state_warnings(found)))
+    expanded = _expansion_warning(parm, parm.parmTemplate(), before)
     if expanded:
-        notes.append(expanded)
+        notes.append(("expanded", expanded))
     return notes
 
 
-def script_write_note(parm, value, target):
-    """One line for a parameter that a script wrote in a way that changes
-    nothing, or changes something else. None for a plain write. `target` is
-    the parameter that a channel reference sent the write to, read before it."""
+def script_write_notes(parm, value, target, before=None):
+    """[(kind, line)] for a parameter that a script wrote in a way that changes
+    nothing, or changes something else. Empty for a plain write. `target` is
+    the parameter that a channel reference sent the write to, and `before` the
+    text it held, both read before the write."""
     template = parm.parmTemplate()
-    notes = write_notes(parm, target)
+    notes = _notes(parm, target, None, before)
     bits = _bits(template)
     if bits and isinstance(value, str):
-        notes.append(f"this menu is a bit field, and Houdini stored {value!r} as the "
-                     f"item index {parm.eval()}, not as its bit. Write the sum of the "
-                     f"bits: {bits}.")
+        notes.append(("bit_field", f"this menu is a bit field, and Houdini stored {value!r} "
+                                   f"as the item index {parm.eval()}, not as its bit. Write "
+                                   f"the sum of the bits: {bits}."))
     range_note = _range_note(template, value, parm.eval())
     if range_note:
-        notes.append(range_note)
+        notes.append(("clamped", range_note))
     expression = _expression(parm)
     if expression and not target:
-        notes.append(f"the parameter carries the expression {expression!r}, which "
-                     f"still decides the value.")
-    return f"{parm.path()}: " + " ".join(notes) if notes else None
+        notes.append(("expression", f"the parameter carries the expression {expression!r}, "
+                                    f"which still decides the value."))
+    return [(kind, f"{parm.path()}: {line}") for kind, line in notes]
 
 
-def _expansion_warning(parm, template):
+def _expansion_warning(parm, template, before=None):
     """Houdini expands $VAR and `backticks` in the text of a string parameter.
 
     The text that VEX or a file name then gets is not the text that was
     written, and nothing reports it: a `$1` in a regular expression becomes an
     empty string, and the node cooks a wrong result with no error.
+
+    A file path is meant to expand ($HIP, $F4, and the variables that a node
+    sets for itself, such as $SLICE on File Merge), and a write that puts back
+    the text that was there changes nothing, so neither is reported.
     """
     if template.type() != hou.parmTemplateType.String:
+        return None
+    if template.stringType() == hou.stringParmType.FileReference:
         return None
     try:
         written, used = parm.unexpandedString(), parm.eval()
     except hou.OperationFailed:
         return None
-    if written == used:
+    if written == used or written == before:
         return None
     return (f"Houdini expanded variables in this text, so the value that the node uses is "
             f"not the value that was written. Written: {written!r}. Used: {used!r}. "
             f"Escape each dollar sign as \\$, or use another way to write it.")
 
 
-def _write_tuple(parm_tuple, values, follow_reference):
+def _write_tuple(parm_tuple, values, follow_reference, check_state=True):
     """A write to every component of a parameter tuple, for example t or scale."""
     node = parm_tuple.node()
-    reports = [_write(node, parm.name(), value, follow_reference)
+    reports = [_write(node, parm.name(), value, follow_reference, check_state)
                for parm, value in zip(parm_tuple, values)]
     return {"parm": parm_tuple.name(), "components": reports,
             "applied": all(report.get("applied") for report in reports)}
@@ -441,8 +482,18 @@ def set_parameter(node_path, parm_name, value, follow_reference=False):
 def set_parameters(node_path, parameters, follow_reference=False):
     """Set several parameters. Names that do not exist come back in the result."""
     node = _node(node_path)
-    changes = [_write(node, name, value, follow_reference)
+    changes = [_write(node, name, value, follow_reference, check_state=False)
                for name, value in parameters.items()]
+    # The state is read after all the writes, so a toggle that the same call
+    # turns on counts.
+    for change in changes:
+        for report in change.get("components") or [change]:
+            parm = node.parm(report["parm"])
+            if parm is None or "new" not in report:
+                continue
+            found = state_notes(parm, report)
+            if found:
+                report["warnings"] = report.get("warnings", []) + found
     return {
         "path": node_path,
         "changes": changes,

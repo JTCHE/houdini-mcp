@@ -60,6 +60,26 @@ def _folder(group, snippet):
     return folder
 
 
+def fold_spares(node):
+    """Move the spare parameters at the top level of a wrangle into the folder
+    above the code. A script that appends them puts them below the code.
+    Returns the names it moved."""
+    if node.parm("snippet") is None:
+        return []
+    group = node.parmTemplateGroup()
+    own = node.type().parmTemplateGroup()
+    loose = [template for template in group.entries()
+             if template.name() != FOLDER and own.find(template.name()) is None
+             and template.type() != hou.parmTemplateType.Folder]
+    if not loose:
+        return []
+    for template in loose:
+        group.remove(template.name())
+        group.appendToFolder(_folder(group, "snippet"), template)
+    node.setParmTemplateGroup(group)
+    return [template.name() for template in loose]
+
+
 def _generated(node):
     """The names of the parameters in the folder of generated parameters."""
     folder = node.parmTemplateGroup().find(FOLDER)
