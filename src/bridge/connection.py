@@ -8,6 +8,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -501,18 +502,60 @@ def interrupt(port: int = None) -> str:
     with open(protocol.interrupt_file(port), "w"):
         pass
     # Give the call time to stop, so the report says whether Houdini is back.
-    deadline = time.monotonic() + 6.0
+    if _back(port, 6.0):
+        return f"The call on port {port} stopped, and Houdini answers again."
+    # One long cook never returns to Python, so the file is not read. Houdini
+    # reads the Escape key during a cook, also a key that another process
+    # posts to its window, which needs no focus.
+    entry = next(entry for entry in protocol.sessions() if entry["port"] == port)
+    if entry.get("ui") and entry.get("pid") and sys.platform == "win32":
+        posted = _post_escape(entry["pid"])
+        if posted and _back(port, 8.0):
+            return (f"The call on port {port} did not stop at the next Python step, so an "
+                    f"Escape key went to the Houdini window, and the cook stopped: Houdini "
+                    f"answers again. A stopped simulation keeps a partial cache.")
+    return (f"Asked the call on port {port} to stop, and Houdini does not answer yet. One "
+            f"long call into Houdini, such as one cook, ends before the stop can act"
+            f"{'' if entry.get('ui') else ' (a headless Houdini has no window to send Escape to)'}"
+            f"; a script that catches BaseException in a loop never lets it act. Wait and "
+            f"call session action='status'.")
+
+
+def _back(port: int, seconds: float) -> bool:
+    """True when the call on `port` ends within `seconds`."""
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         ours = _connection is not None and _connection.port == port
         if ours and _connection.running:
             pass
         elif (ours and _connection.sock is not None) or port_is_listening(port):
-            return f"The call on port {port} stopped, and Houdini answers again."
+            return True
         time.sleep(0.2)
-    return (f"Asked the call on port {port} to stop, and Houdini does not answer yet. One "
-            f"long call into Houdini, such as one cook, ends before the stop can act; a "
-            f"script that catches BaseException in a loop never lets it act. Wait and call "
-            f"session action='status'.")
+    return False
+
+
+def _post_escape(pid: int) -> int:
+    """Post an Escape key to every visible window of the process. Returns how
+    many windows got it. Windows only."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(window, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(window):
+            found.append(window)
+        return True
+
+    user32.EnumWindows(each, 0)
+    for window in found:
+        # WM_KEYDOWN and WM_KEYUP of VK_ESCAPE, with the scan code in lParam.
+        user32.PostMessageW(window, 0x0100, 0x1B, 0x00010001)
+        user32.PostMessageW(window, 0x0101, 0x1B, 0xC0010001)
+    return len(found)
 
 
 def detach() -> dict:

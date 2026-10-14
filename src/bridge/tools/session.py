@@ -51,7 +51,11 @@ def tool(action: str = "status", hip: str = None, port: int = None,
         "detach"    — forget the attached port and let the bridge choose again.
         "interrupt" — stop the call that runs now in the attached Houdini, or
                       in the one on `port`: a script past its budget, a loop
-                      that will not end. Houdini answers again after it.
+                      that will not end. Houdini answers again after it. A
+                      single long cook does not return to Python; then, in a
+                      Houdini with a window on Windows, it sends Escape to
+                      the window, as the user would. A stopped simulation
+                      keeps a partial cache.
         "start"     — start a headless Houdini (hython) and attach to it.
                       `version` chooses the release, for example "21.0" or
                       "21.0.829"; without it, the version of the Houdini window
