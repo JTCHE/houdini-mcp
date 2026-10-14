@@ -38,8 +38,9 @@ PARAMS = {
     "code_file": "wrangle: read the VEX from this file, so a long snippet travels once.",
     "replace": 'wrangle: edit the snippet in place, a list of {"old": ..., "new": ...}. '
                "Each old must appear exactly once.",
-    "paths": "copy: the nodes to copy. layout: place only these nodes. box: the nodes to "
-             "put in the box.",
+    "paths": "copy: the nodes to copy. delete: the nodes to delete together. layout: place "
+             "only these nodes. box: the nodes to put in the box.",
+    "force": "delete: delete a node that still feeds a node that stays.",
     "suffix": "copy: text added to the name of each copy.",
     "names": "copy: a new name for each source, by source path or name.",
     "text": "note: the text of the note. box: the comment of the box.",
@@ -57,7 +58,7 @@ def tool(mode: str = "create",
          take_name: str = None, input_path: str = None,
          code_file: str = None, replace: List[Dict[str, str]] = None,
          paths: List[str] = None, suffix: str = None,
-         names: Dict[str, str] = None, text: str = None) -> str:
+         names: Dict[str, str] = None, text: str = None, force: bool = None) -> str:
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
@@ -71,7 +72,10 @@ def tool(mode: str = "create",
                              parameters, input_path. context selects the
                              network kind: "sop" (default), "cop", "chop",
                              "lop", "material_network".
-        "delete"           — path, of a node, a sticky note or a network box.
+        "delete"           — path or paths: nodes, dots, sticky notes or
+                             network boxes. A node that still feeds a node
+                             outside paths is refused, with the list of its
+                             readers, unless force=true.
         "copy"             — paths (or path), destination_path, suffix,
                              names. Copies a set of nodes with the wires
                              between them; a wire from outside the set goes to
@@ -124,6 +128,6 @@ def tool(mode: str = "create",
         ("material_type", material_type), ("material_path", material_path),
         ("take_name", take_name), ("input_path", input_path),
         ("code_file", code_file), ("replace", replace), ("paths", paths),
-        ("suffix", suffix), ("names", names), ("text", text),
+        ("suffix", suffix), ("names", names), ("text", text), ("force", force),
     ) if value is not None})
     return call_json("node_edit", arguments)

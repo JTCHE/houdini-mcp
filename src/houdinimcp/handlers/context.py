@@ -55,9 +55,8 @@ def get_network_overview(path="/obj", pattern=None, node_type=None, compact=Fals
                   for connection in child.inputConnections()]
         if inputs:
             info["inputs"] = inputs
-        readers = sorted({connection.outputNode().name()
-                          for connection in child.outputConnections()
-                          if connection.outputNode() is not None})
+        # outputs() follows dots; outputConnections() stops at a dot.
+        readers = sorted({reader.name() for reader in child.outputs()})
         if readers:
             info["outputs"] = readers
         flags = [flag for flag, ask in (("display", "isDisplayFlagSet"),
@@ -116,13 +115,9 @@ def explain_node(path):
             "value": str(parm.eval()),
         })
     inputs = []
-    for i, inp in enumerate(node.inputs()):
-        if inp:
-            inputs.append({"index": i, "path": inp.path(), "type": inp.type().name()})
-    outputs = []
-    for conn in node.outputConnections():
-        out = conn.outputNode()
-        outputs.append({"path": out.path(), "type": out.type().name(), "input_index": conn.inputIndex()})
+    for connection in node.inputConnections():
+        inputs.append({"index": connection.inputIndex(), **wire_source(connection)})
+    outputs = [{"path": out.path(), "type": out.type().name()} for out in node.outputs()]
     return {
         "path": node.path(),
         "type": node_type.name(),

@@ -13,8 +13,8 @@ PARAMS = {
     "items": 'A list of wires for "connect" or "disconnect", each a dictionary with the '
              'keys of one wire, for example {"src_path": "/obj/geo1/grid1", "dst_path": '
              '"/obj/geo1/mountain1"}. An argument outside items is the default for each one.',
-    "src_path": "connect: the node whose output feeds the wire.",
-    "dst_path": "connect: the node whose input takes the wire.",
+    "src_path": "connect: the node or network dot whose output feeds the wire.",
+    "dst_path": "connect: the node or network dot whose input takes the wire.",
     "dst_input_index": "connect: the input of dst_path, from 0.",
     "src_output_index": "connect: the output of src_path, from 0.",
     "path": "disconnect and reorder: the node whose inputs change.",
@@ -41,6 +41,7 @@ def tool(mode: str = "connect",
         "connect"    — src_path feeds dst_path. dst_input_index chooses the
                        input, src_output_index the output. Both count from 0.
                        A wire into an input that has one replaces it.
+                       Either end can be a network dot.
         "disconnect" — path loses the wire on input_index.
         "reorder"    — path takes its inputs in the order input_indices.
 

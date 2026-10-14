@@ -46,6 +46,12 @@ def tool(source: str = None, mode: str = "python", language: str = "hscript",
     session, for example `print(dir(hou.Node))`. The code runs with the rights
     of the Houdini process: it can write files, delete nodes and quit Houdini.
 
+    Do not use it to build a network: one batch of node_edit create, connect
+    and parm_set is also one round trip, and each step reports its errors.
+    `hou.Node.inputs()` skips network dots and gives the node behind them; use
+    `inputConnections()` and `inputItem()` for the real wiring before you
+    rewire or delete.
+
     Prefer a named tool when one exists. A write in code to a parameter that
     holds an expression, that is disabled or hidden, or whose range clamps the
     value changes nothing, and a write to a channel reference changes another

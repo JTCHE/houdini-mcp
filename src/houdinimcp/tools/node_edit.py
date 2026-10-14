@@ -39,7 +39,7 @@ def _one(mode, item):
                                  item.get("position"), item.get("parameters"),
                                  item.get("input_path"))
     if mode == "delete":
-        return nodes.delete_node(item["path"])
+        return nodes.delete_nodes(item.get("paths") or [item["path"]], item.get("force", False))
     if mode == "copy":
         return nodes.copy_nodes(item.get("paths") or [item["path"]],
                                 item.get("destination_path"), item.get("suffix"),

@@ -97,15 +97,38 @@ def modify_node(path, parameters=None, position=None, name=None):
     return {"path": node.path(), "changes": changes}
 
 
-def delete_node(path):
-    """Delete a node, a sticky note or a network box."""
-    node = hou.node(path) or hou.item(path)
-    if not node:
-        raise ValueError(f"Node not found: {path}")
-    node_path = node.path()
-    node_name = node.name()
-    node.destroy()
-    return {"deleted": node_path, "name": node_name}
+def delete_nodes(paths, force=False):
+    """Delete nodes, dots, sticky notes or network boxes.
+
+    A node that feeds a node outside `paths` is refused unless `force`: a
+    script that took a node behind a dot for "the input" deletes a node that
+    the graph still reads, and the cook goes empty with no error.
+    """
+    items = []
+    for path in paths:
+        item = hou.node(path) or hou.item(path)
+        if not item:
+            raise ValueError(f"Node not found: {path}")
+        items.append(item)
+    going = {item.path() for item in items}
+    if not force:
+        kept = {}
+        for item in items:
+            if not isinstance(item, hou.Node):
+                continue
+            # outputs() follows dots; outputConnections() stops at a dot.
+            readers = sorted({reader.path() for reader in item.outputs()} - going)
+            if readers:
+                kept[item.path()] = readers
+        if kept:
+            raise ValueError(
+                f"Nothing deleted. These nodes still feed nodes that stay: {kept}. Rewire "
+                f"the readers first, add them to paths, or give force=true.")
+    deleted = []
+    for item in items:
+        deleted.append(item.path())
+        item.destroy()
+    return {"deleted": deleted}
 
 
 def _parm_default_value(parm):
@@ -217,17 +240,24 @@ def get_node_info(path, include_all_parms=False):
     node_info["parameter_count"] = len(node.parms())
     node_info["unchanged_count"] = unchanged_count
 
-    for i, in_node in enumerate(node.inputs()):
-        if in_node:
-            node_info["inputs"].append({
-                "index": i,
-                "name": in_node.name(),
-                "path": in_node.path(),
-                "type": in_node.type().name(),
-            })
+    for connection in node.inputConnections():
+        in_node = connection.inputNode()
+        entry = {"index": connection.inputIndex()}
+        item = connection.inputItem()
+        if item is not None and item != in_node:
+            # A dot (or a subnet input) is what is wired here; the node is behind it.
+            entry["via"] = item.path() if hasattr(item, "path") else str(item)
+        if in_node is not None:
+            entry.update(name=in_node.name(), path=in_node.path(), type=in_node.type().name())
+        node_info["inputs"].append(entry)
 
     for out_conn in node.outputConnections():
         out_node = out_conn.outputNode()
+        if out_node is None:
+            # The wire goes into a dot; list the readers behind it.
+            node_info.setdefault("outputs_via_dots", []).extend(
+                reader.path() for reader in out_conn.outputItem().outputs())
+            continue
         node_info["outputs"].append({
             "name": out_node.name(),
             "path": out_node.path(),
@@ -683,13 +713,17 @@ def connect_nodes_batch(connections):
     """
     results = []
     for conn in connections:
-        src = hou.node(conn["src_path"])
-        dst = hou.node(conn["dst_path"])
+        # Either end can be a network dot.
+        src = hou.node(conn["src_path"]) or hou.item(conn["src_path"])
+        dst = hou.node(conn["dst_path"]) or hou.item(conn["dst_path"])
         if not src:
             raise ValueError(f"Source not found: {conn['src_path']}")
         if not dst:
             raise ValueError(f"Destination not found: {conn['dst_path']}")
-        dst.setInput(conn.get("dst_input_index", 0), src, conn.get("src_output_index", 0))
+        if isinstance(dst, hou.NetworkDot):
+            dst.setInput(src, conn.get("src_output_index", 0))
+        else:
+            dst.setInput(conn.get("dst_input_index", 0), src, conn.get("src_output_index", 0))
         results.append({
             "src": src.path(), "dst": dst.path(),
             "dst_input": conn.get("dst_input_index", 0),
@@ -700,7 +734,7 @@ def connect_nodes_batch(connections):
     # make room, as when a new node goes in on a wire.
     made = {node.path(): node for node in (hou.node(result[end]) for result in results
                                            for end in ("src", "dst"))
-            if node.userData(MADE)}
+            if isinstance(node, hou.Node) and node.userData(MADE)}
     if made:
         layout.place(list(made.values()))
         network = next(iter(made.values())).parent()
@@ -716,7 +750,10 @@ def reorder_inputs(path, input_indices):
     node = hou.node(path)
     if not node:
         raise ValueError(f"Node not found: {path}")
-    current_inputs = list(node.inputs())
+    # The wired items, not inputs(): a dot on a wire must stay on it.
+    current_inputs = [None] * len(node.inputs())
+    for connection in node.inputConnections():
+        current_inputs[connection.inputIndex()] = connection.inputItem()
     new_inputs = []
     for idx in input_indices:
         if idx is not None and idx < len(current_inputs):
