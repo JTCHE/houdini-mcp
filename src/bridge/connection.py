@@ -366,7 +366,10 @@ def start_headless(version: str = None, wait_seconds: float = 90.0) -> str:
     if not hython:
         raise HoudiniError("No hython was found. Set HFS to a Houdini install, or start "
                            "Houdini yourself.")
-    known = {entry["port"] for entry in protocol.sessions()}
+    # A forced port is always listed, so with one the new session is the one
+    # that answers on it, not one that was not known before.
+    known = set() if protocol.FORCED_PORT else {
+        entry["port"] for entry in protocol.sessions()}
     _hython = subprocess.Popen([hython, HEADLESS_SCRIPT], env=houdini_env(),
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
