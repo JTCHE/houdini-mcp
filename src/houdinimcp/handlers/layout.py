@@ -34,7 +34,20 @@ The rules come from networks that the user laid out by hand:
    row: the fan passes above it.
 12. Loose nodes (dead ends, side sources) move to the free spot near their
    wire where their wires cross the fewest others and pass over no text.
-13. `place`, `insert` and `place_chain` never move a node that the user placed,
+13. Columns sit close: a column keeps a small gap from the text that the
+   columns on its left draw in the same rows. Where a column only carries a
+   wire past a row, a node there only clears the wire. A feeder lane keeps
+   more room, so it does not read as part of the text.
+14. A node that reads three nodes or more (a Merge) has a free row above it,
+   where the wires from the sides turn. A source with one reader sits in that
+   row; a side chain ends above it.
+15. A dead end sits right of the name of its source.
+16. A wire that skips rows into one reader drops straight into its input
+   through one dot, and turns under the text of its source.
+17. The across runs into one reader stack by input: the input furthest left
+   turns highest. A run that would pass behind a node or cross the wire of a
+   side source goes higher, between the rows.
+18. `place`, `insert` and `place_chain` never move a node that the user placed,
    except down, to clear an overlap or to make the room that a new node needs.
    They return every node that moved, with the old and the new position.
 
@@ -50,11 +63,12 @@ import math
 import hou
 
 ROW = 1.3            # vertical distance between two rows
-GAP = 0.45           # free space between the drawn boxes of two columns
-CHAR = 0.12          # width of one character of drawn text
+GAP = 0.2            # free space between the drawn boxes of two columns
+CHAR = 0.1           # width of one character of drawn text
 LINE = 0.25          # height of one line of drawn text
 DOT_ABOVE = 0.55     # a lane dot sits this far above the row of its reader
 LANE = 0.8           # width of a lane column
+LANE_ROOM = 2.0      # free space left of the lane of a feeder
 COLUMN_STEP = 3.6    # a sibling column when nothing else decides
 # Long wires skip more rows than this before they take a lane.
 SKIP = 2
@@ -345,14 +359,20 @@ def _ranks(nodes, wires):
     # source of its input 0 fans out to other nodes too, and those wires
     # must pass above the side source, not through its row.
     spaced = set()
+    # A node that reads three nodes or more (a Merge) gets a free row above
+    # it, where the wires that come in from the sides turn.
+    wide = {node for node in nodes if len(set(inputs[node])) > 2}
     for _ in range(len(nodes) + 1):
         rank.clear()
         for node in order:
             rank[node] = max([rank[s] + 1 + extra[s] + (s in spaced_from(node, spaced))
-                              for s in inputs[node] if s in rank] or [0])
+                              + (node in wide) for s in inputs[node] if s in rank] or [0])
         pulled = {}
         for node in reversed(order):
-            below = [rank[r] for r in readers[node] if r in rank]
+            # A side chain or a feeder ends above the free row of a Merge; a
+            # source with one reader sits in it.
+            alone = not inputs[node] and len(readers[node]) == 1
+            below = [rank[r] - (r in wide and not alone) for r in readers[node] if r in rank]
             pulled[node] = bool(below) and (not inputs[node] or all(
                 port[node, r] > 0 or pulled.get(r) for r in readers[node]))
             if pulled[node]:
@@ -581,12 +601,14 @@ def _columns(group, rank, inputs, readers, extra, wires):
     return column, used
 
 
-def _column_x(group, column, used, rank, extra, left):
+def _column_x(group, column, used, rank, extra, left, lanes=()):
     """The x of each column. A column keeps clear of what the columns on its
     left draw in the rows that it uses: its nodes and the wires that run down
     it. A long name or path in a row far away does not push it. A column left
     of the main one (a negative column) keeps clear of the columns on its
-    right the same way. The leftmost column starts at `left`."""
+    right the same way. The leftmost column starts at `left`. The lane of a
+    feeder (in `lanes`) keeps LANE_ROOM from the text on its left, so the long
+    wire does not read as part of that text."""
     drawn = {}        # column -> [(rows, width)] of its nodes, text included
     for node in group:
         b = box(node)
@@ -600,24 +622,23 @@ def _column_x(group, column, used, rank, extra, left):
         for other in range(low, col):
             if other not in xs:
                 continue
-            near = {r + d for r in mine for d in (-1, 0, 1)}
             for rows, width in drawn.get(other, []):
-                if rows & near:
-                    x = max(x, xs[other] + width + GAP)
+                if rows & mine:
+                    x = max(x, xs[other] + width + (LANE_ROOM if col in lanes else GAP))
             if used.get(other, set()) & mine:
-                # A wire runs down that column in these rows.
-                x = max(x, xs[other] + _NODE_WIDTH + GAP)
+                # A wire runs down that column in these rows: clear it.
+                x = max(x, xs[other] + _NODE_WIDTH / 2 + GAP)
         xs[col] = x
     for col in range(-1, low - 1, -1):
         mine = used.get(col, set())
         x = xs[col + 1] - LANE
         for other in range(col + 1, high + 1):
-            theirs = {r + d for r in used.get(other, set()) for d in (-1, 0, 1)}
+            theirs = used.get(other, set())
             for rows, width in drawn.get(col, []):
                 if rows & theirs:
                     x = min(x, xs[other] - width - GAP)
-            if used.get(other, set()) & mine:
-                x = min(x, xs[other] - _NODE_WIDTH - GAP)
+            if theirs & mine:
+                x = min(x, xs[other] - _NODE_WIDTH / 2 - GAP)
         xs[col] = x
     shift = left - min(xs.values())
     return {col: x + shift for col, x in xs.items()}
@@ -653,7 +674,9 @@ def layout(parent=None, nodes=None, origin=None):
                         key=lambda g: min(before[n][0] for n in g)):
         column, used = _columns(group, rank, inputs, readers, extra, wires)
         if vertical:
-            xs = _column_x(group, column, used, rank, extra, left)
+            lanes = {column[node] for node in group if not inputs[node] and
+                     len(readers[node]) > 1}
+            xs = _column_x(group, column, used, rank, extra, left, lanes)
             for node in group:
                 node.setPosition(hou.Vector2(xs[column[node]], origin[1] - rank[node] * ROW))
             _nudge(group, wires, inputs, readers, column)
@@ -724,7 +747,12 @@ def _nudge(group, wires, inputs, readers, column):
 
     def line(wire):
         source, output, reader, index, _ = wire
-        return wire_line([_out_point(source, output), _in_point(reader, index)], curved)
+        p, q = _out_point(source, output), _in_point(reader, index)
+        if len(readers[source]) > 1 and p[1] - q[1] > ROW * 1.5:
+            # A source that feeds several nodes reaches the far ones down a
+            # lane, through a dot above each reader (see _route).
+            return wire_line([p, (p[0], q[1] + DOT_ABOVE), q], curved)
+        return wire_line([p, q], curved)
 
     def cost(node, base, lines, shapes, boxes):
         """The price of where `node` is now. `lines`, `shapes` and `boxes`
@@ -773,12 +801,16 @@ def _nudge(group, wires, inputs, readers, column):
             near = [other for other in group if other != node and
                     abs(_pos(other)[1] - py) < ROW * 2.5]
             width = boxes[node][2] - boxes[node][0]
+            # A dead end sits right of the name of its source.
+            clear = box(partner, full=False)[2] - 0.2
             # A source only moves down, in its column: a lane may pass there.
             # A dead end stays right of its source, away from the column of
             # the chain it leaves.
-            xs = {base[0]} if not inputs[node] else                 {x for x in {px} | {boxes[other][2] + GAP for other in near} |
-                 {boxes[other][0] - width - GAP for other in near} if x >= px - 1e-6}
+            xs = {base[0] + 0.4 * step for step in range(6)} if not inputs[node] else                 {x for x in {px} | {boxes[other][2] + GAP for other in near} |
+                 {boxes[other][0] - width - GAP for other in near} | {clear} if x >= clear - 1e-6}
             best, spot = cost(node, base, lines, shapes, boxes), base
+            if inputs[node] and base[0] < clear - 1e-6:
+                best = float("inf")
             for x in xs:
                 for y in heights:
                     node.setPosition(hou.Vector2(x, y))
@@ -842,6 +874,7 @@ def _route(wires, inside):
 
     made = 0
     taken = []           # (x, y_top, y_bottom) of the lanes made so far
+    stack = []           # (reader, input, dot) of the lane dots above readers
     for (source, output), targets in sorted(lanes.items(),
                                             key=lambda pair: -_pos(pair[0][0])[1]):
         targets.sort(key=lambda target: -_pos(target[0])[1])
@@ -856,6 +889,15 @@ def _route(wires, inside):
                 if item != source and box(item)[1] <= top and box(item)[3] >= bottom - 0.5]
         x = own if all(own > box(r, full=False)[2] + 0.2 for r in readers) else \
             max(box(r, full=False)[2] for r in readers) + GAP
+        if len(targets) == 1:
+            # One reader: the lane drops straight into its input when nothing
+            # is in the way there, as the user wires it.
+            straight = _in_point(*targets[0])[0]
+            clear = [box(item, full=False) for item in network.children()
+                     if item not in readers and item != source and
+                     box(item)[1] <= top and box(item)[3] >= bottom - 0.5]
+            if not any(b[0] - 0.2 <= straight <= b[2] + 0.2 for b in clear):
+                x, span = straight, clear
         for _ in range(200):
             hit = [b[2] for b in span if b[0] - 0.2 <= x <= b[2] + 0.2]
             hit += [lane[0] for lane in taken
@@ -865,16 +907,28 @@ def _route(wires, inside):
             x = max(hit) + GAP
         taken.append((x, top, bottom))
         feed = source
+        drop = len(targets) == 1 and abs(x - _in_point(*targets[0])[0]) < 1e-6
         if abs(x - own) > 0.05:
             # Out to the lane between two rows, where no node sits, then down.
+            y = _pos(source)[1] - ROW * 0.5
+            if drop and curved:
+                # The across run goes in the free band under the text of the
+                # source, and the wire drops straight into its reader.
+                free = (box(source)[1] + _pos(source)[1] - ROW * (1 + _extra_rows(source)) +
+                        _size(source)[1] + TYPE_LABEL) / 2.0
+                y = max(2 * free - top, _in_point(*targets[0])[1] + 0.3)
             turn = network.createNetworkDot()
-            turn.setPosition(hou.Vector2(x, _pos(source)[1] - ROW * 0.5))
+            turn.setPosition(hou.Vector2(x, y))
             turn.setInput(source, output)
             feed = turn
             made += 1
         for reader, index in targets:
+            if drop and feed != source:
+                reader.setInput(index, feed)
+                continue
             dot = network.createNetworkDot()
-            dot.setPosition(hou.Vector2(x, _pos(reader)[1] + _size(reader)[1] + DOT_ABOVE))
+            dot.setPosition(hou.Vector2(x, _in_point(reader, index)[1] + DOT_ABOVE))
+            stack.append((reader, index, dot))
             if feed == source:
                 dot.setInput(source, output)
             else:
@@ -882,6 +936,7 @@ def _route(wires, inside):
             reader.setInput(index, dot)
             feed = dot
             made += 1
+    _stack(stack, wires, lanes, curved)
     # A dot that fed only another old dot feeds nothing after that one goes.
     removed, left = 0, set(old)
     while True:
@@ -893,6 +948,37 @@ def _route(wires, inside):
         removed += len(dead)
         left -= dead
     return {"made": made, "removed": removed}
+
+
+def _stack(stack, wires, lanes, curved):
+    """Set the height of the lane dots above each reader. The across runs
+    into one reader stack by input: the input furthest right turns lowest,
+    the next one above it, so no run lies on another or crosses the drop of
+    another wire into the reader. A run that would pass behind a node, or
+    cross the wire of a side source that sits above the reader, goes higher,
+    between the rows, but stays under the dot that feeds it."""
+    for reader in {r for r, _, _ in stack}:
+        direct = [wire_line([_out_point(s, o), _in_point(r, i)], curved)
+                  for s, o, r, i, _ in wires if r == reader and i > 0 and
+                  (r, i) not in lanes.get((s, o), [])]
+        level = max([(line[0][1] - line[-1][1]) / 2.0 for line in direct
+                     if abs(line[0][0] - line[-1][0]) > 0.3] or [-1.0])
+        for _, index, dot in sorted([d for d in stack if d[0] == reader],
+                                    key=lambda d: -d[1]):
+            end = _in_point(reader, index)
+            x = _pos(dot)[0]
+            feed = dot.inputItem()
+            top = (_pos(feed)[1] if isinstance(feed, hou.NetworkDot) else
+                   _out_point(feed, 0)[1]) - 0.2 - end[1]
+            above = max(DOT_ABOVE, 2 * (level + 0.25))
+            while above < top and (
+                    _blocked(wire_line([(x, end[1] + above), end], curved), [reader]) or
+                    any(_lines_cross(wire_line([(x, end[1] + above), end], curved), line)
+                        for line in direct)):
+                above += 0.25
+            above = min(above, top)
+            dot.setPosition(hou.Vector2(x, end[1] + above))
+            level = above / 2.0
 
 
 # ---------------------------------------------------------------------------
