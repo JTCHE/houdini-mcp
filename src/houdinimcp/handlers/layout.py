@@ -578,8 +578,12 @@ def _columns(group, rank, inputs, readers, extra, wires):
         the branches spread on both sides, and their wires come in from both
         sides, not on top of each other."""
         right = column[node]
-        branches = [source for index, source in ports.get(node, [])
-                    if index and inputs[source] and source not in column]
+        # One source on several inputs is one branch, and the source of
+        # input 0 is the column itself, not a branch.
+        first = [source for index, source in ports.get(node, []) if not index]
+        branches = list(dict.fromkeys(
+            source for index, source in sorted(ports.get(node, []), key=lambda pair: pair[0])
+            if index and inputs[source] and source not in column and source not in first))
         for index, source in sorted(ports.get(node, []), key=lambda pair: pair[0]):
             # Placed already (a source with more readers), or a loop.
             if source in column or rank[source] >= rank[node]:
