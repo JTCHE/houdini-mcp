@@ -7,7 +7,7 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldH
 
 PARAMS = {
     "mode": 'One of "scene", "network", "children", "search", "node_types", "errors", '
-            '"materials", "lights", "takes", "caches", "render_nodes", "viewports".',
+            '"materials", "lights", "takes", "caches", "render_nodes", "viewports", "changes".',
     "path": 'A node path such as "/obj" or "/obj/geo1": the network to list or to search.',
     "pattern": "search: the name to match, with * and ? as wildcards. network, node_types: "
                'keep the names that match; "|" separates alternatives, for example '
@@ -50,6 +50,12 @@ def tool(mode: str = "scene", path: str = None, pattern: str = None,
         "caches"       — file caches under `path` and their state on disk.
         "render_nodes" — the ROP nodes in /out.
         "viewports"    — the panes, and what the scene viewer shows.
+        "changes"      — what the user changed in the network `path` since
+                         your last call: nodes added, deleted, renamed or
+                         moved, wires, flags and parameter values. Your own
+                         changes are not listed. The first call starts to
+                         watch the network; call it at the start of each
+                         turn, before you change anything there.
 
     Returns JSON. A path that does not exist comes back as an error, not as an
     empty list.

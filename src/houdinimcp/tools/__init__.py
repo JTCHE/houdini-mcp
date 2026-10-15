@@ -12,6 +12,8 @@ import pkgutil
 
 import hou
 
+from ..handlers import changes
+
 MODULES = sorted(module.name for module in pkgutil.iter_modules(__path__))
 
 
@@ -28,8 +30,12 @@ def dispatch(command: str, params: dict, label: str = None):
     module = module_of(command)
     mutates = getattr(module, "MUTATES", False)
     if mutates(params) if callable(mutates) else mutates:
-        with hou.undos.group(label or f"MCP: {command}"):
-            return module.run(**params)
+        try:
+            with hou.undos.group(label or f"MCP: {command}"):
+                return module.run(**params)
+        finally:
+            # What this call changed is not a change of the user.
+            changes.refresh()
     return module.run(**params)
 
 

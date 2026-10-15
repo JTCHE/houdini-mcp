@@ -1,11 +1,12 @@
 """Lists: what is in the scene, and what the scene can use."""
 from . import unknown_mode
-from ..handlers import cache, context, lop, materials, nodes, rendering, scene, takes, viewport
+from ..handlers import (cache, changes, context, lop, materials, nodes, rendering, scene,
+                        takes, viewport)
 
 MUTATES = False
 
 MODES = ("scene", "network", "children", "search", "node_types", "errors",
-         "materials", "lights", "takes", "caches", "render_nodes", "viewports")
+         "materials", "lights", "takes", "caches", "render_nodes", "viewports", "changes")
 
 
 def run(mode="scene", path=None, pattern=None, node_type=None, category=None,
@@ -37,6 +38,10 @@ def run(mode="scene", path=None, pattern=None, node_type=None, category=None,
         return cache.list_caches(path or "/obj")
     if mode == "render_nodes":
         return rendering.list_render_nodes()
+    if mode == "changes":
+        if not path:
+            raise ValueError("mode 'changes' needs path, the network to watch.")
+        return changes.changes(path)
     if mode == "viewports":
         return {"panes": viewport.list_panes(), "viewport": viewport.get_viewport_info()}
     raise unknown_mode(mode, MODES)
