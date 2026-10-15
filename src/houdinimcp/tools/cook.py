@@ -7,7 +7,7 @@ from ..handlers.geometry import failure
 
 MUTATES = True
 
-MODES = ("cook", "cache_write", "cache_clear", "sim_step", "sim_reset")
+MODES = ("cook", "cache_write", "cache_clear", "sim_step", "sim_reset", "recook")
 
 
 def run(paths, mode="cook", frame_range=None, frames=None, num_steps=1,
@@ -68,4 +68,33 @@ def _one(path, mode, frame_range, num_steps):
         return dops.step_simulation(path, num_steps)
     if mode == "sim_reset":
         return dops.reset_simulation(path)
+    if mode == "recook":
+        return _recook(path)
     raise unknown_mode(mode, MODES)
+
+
+def _recook(path):
+    """Cook again each node at or under `path` that holds an error or a
+    warning, the deepest first. A message that goes away was stale: an earlier
+    cook left it, often a script that cooked frames while the viewport did."""
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+
+    def told(item):
+        return list(item.errors()) + list(item.warnings())
+
+    # A ROP or a TOP node cooks by rendering or by making work items.
+    held = [item for item in [node] + list(node.allSubChildren())
+            if item.type().category().name() not in ("Driver", "Top") and told(item)]
+    before = {item.path(): told(item) for item in held}
+    for item in sorted(held, key=lambda item: -item.path().count("/")) + [node]:
+        try:
+            item.cook(force=True)
+        except hou.OperationFailed:
+            pass
+    still = {item.path(): told(item) for item in held if told(item)}
+    return {"path": path, "had_messages": before,
+            "stale": [one for one in before if one not in still], "current": still,
+            "note": "A stale message went away when its node cooked again. A current one "
+                    "came back: it is real. Houdini keeps no frame or time for a message."}

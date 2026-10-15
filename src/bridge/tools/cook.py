@@ -11,7 +11,7 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 
 PARAMS = {
     "paths": "The node to cook, or a list of nodes.",
-    "mode": 'One of "cook", "cache_write", "cache_clear", "sim_step", "sim_reset". '
+    "mode": 'One of "cook", "cache_write", "cache_clear", "sim_step", "sim_reset", "recook". '
             "The description says what each one does.",
     "frame_range": "[start, end]: every frame between. For cook and cache_write.",
     "frames": 'One frame, a list of frames, or {"start": 1001, "end": 1010, "step": 2}. '
@@ -55,6 +55,16 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
                         primitives there. It fails when the result is empty
                         while the sources are not: that simulation stays
                         empty on every frame.
+        "recook"      — cook again each node at or under `paths` that holds
+                        an error or a warning, the deepest first, and say
+                        which messages were stale (gone) and which are
+                        current. Use it when an error names a cause that the
+                        network does not have, such as "Infinite recursion"
+                        with no cycle.
+
+    Cook frames here, not in an execute loop of hou.setFrame and geometry():
+    the viewport cooks the same nodes during the loop, and that can leave
+    false errors on the nodes inside a solver.
 
     Returns JSON: the seconds in total, for each frame, and the slowest frame,
     with the errors and the warnings of every node. Each frame also gives the
