@@ -11,7 +11,7 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 PARAMS = {
     "mode": 'One of "create", "delete", "copy", "move", "rename", "flags", "color", '
             '"layout", "insert", "place_chain", "wrangle", "material", "assign_material", "take", '
-            '"current_network", "note", "box".',
+            '"current_network", "note", "box", "split".',
     "items": "A list of items for a repeated action, each a dictionary with the keys of "
              "one call. An argument outside items is the default for each one.",
     "path": "The node to change. layout: the network. delete: a node, a sticky note or a "
@@ -39,6 +39,7 @@ PARAMS = {
     "reader": "insert: only the wires into this node. place_chain: the node that the chain "
               "feeds.",
     "input_index": "place_chain: the input of reader that the chain feeds.",
+    "stages": 'split: {"stage name": ["node", ...]}, the nodes of `path` for each subnet.',
     "code_file": "wrangle: read the VEX from this file, so a long snippet travels once.",
     "replace": 'wrangle: edit the snippet in place, a list of {"old": ..., "new": ...}. '
                "Each old must appear exactly once.",
@@ -64,7 +65,8 @@ def tool(mode: str = "create",
          code_file: str = None, replace: List[Dict[str, str]] = None,
          paths: List[str] = None, suffix: str = None,
          names: Dict[str, str] = None, text: str = None, force: bool = None,
-         reader: str = None, input_index: int = None) -> str:
+         reader: str = None, input_index: int = None,
+         stages: Dict[str, List[str]] = None) -> str:
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
@@ -122,6 +124,14 @@ def tool(mode: str = "create",
                              node one row above it. Wire a side result into
                              the node that really reads it, not through
                              pass-through ports of a chain.
+        "split"            — path (a SOP network) and stages: move the nodes
+                             of each stage into a subnet of that name. Each
+                             result that another stage reads gets an OUT_
+                             Null, and each reader an IN_ Object Merge.
+                             Node paths in parameters, expressions and VEX
+                             code are rewritten for the new places. Returns
+                             each rewrite and each path it could not
+                             resolve. Undo puts it back in one step.
         "wrangle"          — parent_path with code to make a wrangle, or path
                              with code to write into one. code_file reads the
                              code from a file, so a long snippet travels once.
@@ -153,6 +163,6 @@ def tool(mode: str = "create",
         ("take_name", take_name), ("input_path", input_path),
         ("code_file", code_file), ("replace", replace), ("paths", paths),
         ("suffix", suffix), ("names", names), ("text", text), ("force", force),
-        ("reader", reader), ("input_index", input_index),
+        ("reader", reader), ("input_index", input_index), ("stages", stages),
     ) if value is not None})
     return call_json("node_edit", arguments)

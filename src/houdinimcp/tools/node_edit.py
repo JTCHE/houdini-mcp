@@ -4,13 +4,13 @@ Every mode takes one item or a list of items. Houdini adds a numeric suffix
 when a name is already used, so each result carries the path that Houdini gave.
 """
 from . import run_items, unknown_mode
-from ..handlers import chops, cops, lop, materials, nodes, takes, vex, viewport
+from ..handlers import chops, cops, lop, materials, nodes, split, takes, vex, viewport
 
 MUTATES = True
 
 MODES = ("create", "delete", "copy", "move", "rename", "flags", "color", "layout",
          "insert", "place_chain", "wrangle", "material", "assign_material", "take",
-         "current_network", "note", "box")
+         "current_network", "note", "box", "split")
 
 
 def run(items=None, mode="create", **defaults):
@@ -62,6 +62,8 @@ def _one(mode, item):
     if mode == "insert":
         return nodes.insert_node(item["input_path"], item.get("node_type"), item.get("path"),
                                  item.get("reader"), item.get("name"), item.get("parameters"))
+    if mode == "split":
+        return split.split(item["path"], item["stages"])
     if mode == "place_chain":
         return nodes.place_chain(item["paths"], item["reader"], item.get("input_index", 0))
     if mode == "wrangle":
