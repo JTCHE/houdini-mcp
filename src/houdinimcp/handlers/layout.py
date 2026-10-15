@@ -42,6 +42,8 @@ LANE = 0.8           # width of a lane column
 COLUMN_STEP = 3.6    # a sibling column when nothing else decides
 # Long wires skip more rows than this before they take a lane.
 SKIP = 2
+# The editor draws at most this many characters of a comment or path line.
+TRUNCATE = 40
 # The parameter whose value a node type draws under its name.
 DESCRIPTIVE = {"object_merge": "objpath1", "file": "file", "filecache": "file",
                "alembic": "fileName", "filemerge": "file", "rop_geometry": "sopoutput",
@@ -84,7 +86,9 @@ def _text_lines(node):
             text = ""
         if text:
             lines.append(text)
-    return lines
+    # The editor truncates comment and path text (preference: truncated).
+    return lines[:1] + [line if len(line) <= TRUNCATE else line[:TRUNCATE - 3] + "..."
+                        for line in lines[1:]]
 
 
 def box(item, full=True):
@@ -153,6 +157,34 @@ def _crosses(p, q, rect):
         if t0 > t1:
             return False
     return t1 - t0 > 1e-6
+
+
+def rounded(network):
+    """True when the editor draws the wires of `network` as curves. Shift+S
+    toggles it, and a preference sets it for new networks."""
+    try:
+        return network.connectionDrawStyle() == hou.nodeConnectionDrawStyle.Rounded
+    except (hou.Error, AttributeError):
+        return False
+
+
+def wire_line(points, curved):
+    """The line that the editor draws through `points` (output, dots, input),
+    as a list of points. A curved leg leaves its start straight down and comes
+    into its end from straight above."""
+    if not curved:
+        return list(points)
+    line = [points[0]]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        # ponytail: the bend of the Houdini curve is a guess (half the height,
+        # at least 0.5). Match it to the editor if a grab ever disagrees.
+        bend = max(abs(y1 - y0) * 0.5, 0.5)
+        for step in range(1, 17):
+            t = step / 16.0
+            a, b, c, d = (1 - t) ** 3, 3 * t * (1 - t) ** 2, 3 * t * t * (1 - t), t ** 3
+            line.append(((a + b) * x0 + (c + d) * x1,
+                         a * y0 + b * (y0 - bend) + c * (y1 + bend) + d * y1))
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -318,8 +350,9 @@ def _columns(group, rank, inputs, readers, extra, wires):
             ports.setdefault(reader, []).append((index, source))
 
     # The reader that continues the chain of each node: the reader through
-    # input 0 that leads to the most nodes, so a dead end does not take the
-    # chain; the nearest one on a tie.
+    # input 0 with the longest input 0 chain under it, so a branch that turns
+    # into a side input does not take the column; then the one that leads to
+    # the most nodes; the nearest one on a tie.
     # A source sits above its nearest reader. A reader that also feeds
     # another reader of the same node is a branch to the side.
     below = {}
@@ -339,6 +372,16 @@ def _columns(group, rank, inputs, readers, extra, wires):
         for index, source in pairs:
             if not index:
                 candidates.setdefault(source, []).append(reader)
+    straight = {}
+
+    def chain(node):
+        """How many nodes continue from `node` through input 0 wires: the
+        length of the straight column under it."""
+        if node not in straight:
+            straight[node] = 0
+            straight[node] = max([1 + chain(r) for r in candidates.get(node, [])] or [0])
+        return straight[node]
+
     owner = {}
     for source, found in candidates.items():
         ends = [r for r in found if not any(o in downstream(r) for o in found if o != r)] \
@@ -346,7 +389,7 @@ def _columns(group, rank, inputs, readers, extra, wires):
         if not inputs[source]:
             owner[source] = min(ends, key=lambda r: rank[r])
         else:
-            owner[source] = min(ends, key=lambda r: (-len(downstream(r)), rank[r]))
+            owner[source] = min(ends, key=lambda r: (-chain(r), -len(downstream(r)), rank[r]))
 
     strict = [True]
 
@@ -493,15 +536,16 @@ def layout(parent=None, nodes=None, origin=None):
 # ---------------------------------------------------------------------------
 # Wires: straight when they can be, else down a lane through dots.
 
-def _blocked(p, q, skip):
-    """The first node whose shape the segment p-q passes through."""
+def _blocked(line, skip):
+    """The first node whose shape the drawn `line` (a list of points) passes
+    through."""
     network_items = skip[0].parent().children() if skip else ()
     for item in network_items:
         if item in skip:
             continue
         rect = _shape(item)
         rect = [rect[0] - 0.05, rect[1] - 0.05, rect[2] + 0.05, rect[3] + 0.05]
-        if _crosses(p, q, rect):
+        if any(_crosses(p, q, rect) for p, q in zip(line, line[1:])):
             return item
     return None
 
@@ -514,6 +558,7 @@ def _route(wires, inside):
     if not wires:
         return {"made": 0, "removed": 0}
     network = wires[0][2].parent()
+    curved = rounded(network)
     old = {dot for *_, dots in wires for dot in dots}
     lanes = {}
     for source, output, reader, index, dots in wires:
@@ -522,7 +567,7 @@ def _route(wires, inside):
         p, q = _out_point(source, output), _in_point(reader, index)
         rows = (p[1] - q[1]) / ROW
         straight = (rows <= SKIP + 0.5 or abs(p[0] - q[0]) < 0.3) and \
-            not _blocked(p, q, [source, reader] + list(old))
+            not _blocked(wire_line([p, q], curved), [source, reader] + list(old))
         if straight:
             if dots:
                 reader.setInput(index, source, output)
@@ -782,6 +827,7 @@ def problems(network, nodes=None):
     dots = list(network.networkDots())
     mine = set(nodes) if nodes else set(children) | set(dots)
     vertical = _vertical(network)
+    curved = rounded(network)
     boxes = {item: box(item) for item in children}
     for source, output, reader, index, via in _wires(children):
         if not (reader in mine or source in mine):
@@ -789,8 +835,8 @@ def problems(network, nodes=None):
         if vertical and _pos(reader)[1] > _pos(source)[1] - 0.2 and not via:
             faults.append(f"{reader.name()} is not below its input {source.name()}")
         # Each leg of the wire, through its dots.
-        points = [_out_point(source, output)] + [_pos(dot) for dot in reversed(via)] + \
-            [_in_point(reader, index)]
+        points = wire_line([_out_point(source, output)] + [_pos(dot) for dot in reversed(via)] +
+                           [_in_point(reader, index)], curved)
         for p, q in zip(points, points[1:]):
             behind = next((item for item in children if item not in (source, reader) and
                            _crosses(p, q, _shape(item))), None)

@@ -124,11 +124,12 @@ def tool(mode: str = "viewport", node: str = None, output: str = None,
         "movie"    — `node` over `frames` or `frame_range` (the playbar
                      range) as an MP4 at `fps`, `resolution` [width] wide.
                      Returns the path; open it in a player.
-        "network"  — the network editor as the user sees it: names, wires,
-                     dots, comments. `node` is the network to show, `paths`
-                     the items to frame (default all). The view goes back
-                     after. It grabs screen pixels, so it works only while
-                     Houdini is the window in front; else it refuses.
+        "network"  — a drawing of the network `node` from the scene data:
+                     node colors, flags, names, comments, path text, dots,
+                     network boxes, sticky notes, and the wires in the wire
+                     style of the network (straight or rounded, Shift+S).
+                     `paths` are the items to frame (default all). It does
+                     not touch the screen and works without a window.
         sheet and movie draw with an OpenGL ROP, with or without a window,
         over a flat grey `background`. To see where a point attribute lives, use
         "sheet" with one frame and `color_by`, with `contour`, `slab` or

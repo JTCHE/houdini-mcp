@@ -23,9 +23,7 @@ def run(mode="viewport", node=None, output=None, camera=None, direction=None,
     if mode not in MODES:
         raise unknown_mode(mode, MODES)
     if mode == "network":
-        if not hou.isUIAvailable():
-            raise ValueError("mode 'network' needs a Houdini with a window.")
-        return _with_state(network_view.capture(node, paths, output))
+        return {**network_view.capture(node, paths, output), "window_state": _state()}
     if mode in ("sheet", "movie"):
         # An OpenGL ROP draws these with or without a window, so the call is
         # the same in both.
