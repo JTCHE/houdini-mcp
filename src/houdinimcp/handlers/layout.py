@@ -143,6 +143,9 @@ def box(item, full=True):
     lines = _text_lines(item)[:None if full else 1]
     if not lines:
         return [x, y, x + w, y + h]
+    if item.parent().childTypeCategory() == hou.vopNodeTypeCategory():
+        # A VOP node shows its name in its title bar.
+        return [x, y, x + max(w, len(lines[0]) * CHAR), y + h + LINE]
     width = max(len(line) for line in lines) * CHAR
     # The type label sits above the name, in a smaller font.
     label = TYPE_LABEL if full else 0.0
@@ -158,6 +161,31 @@ def _shape(item):
     return [x, y, x + w, y + h]
 
 
+def _notes(network, notes):
+    """Put each sticky note where it was next to its node, or else in the
+    first free place right of, left of, above or under that node."""
+    taken = [box(node) for node in network.children()]
+    for note, near, offset in notes:
+        w, h = _size(note)
+        x0, y0, x1, y1 = box(near)
+        tries = [_pos(near) + offset, hou.Vector2(x1 + 0.3, y1 - h),
+                 hou.Vector2(x0 - w - 0.3, y1 - h), hou.Vector2(x0, y1 + 0.3),
+                 hou.Vector2(x0, y0 - h - 0.3)]
+        right = max(t[2] for t in taken)
+        tries.append(hou.Vector2(right + 0.5, y1 - h))
+        for spot in tries:
+            shape = (spot[0], spot[1], spot[0] + w, spot[1] + h)
+            if not any(_overlap(shape, other, 0.1) for other in taken):
+                break
+        note.setPosition(spot)
+        taken.append(_shape(note))
+
+
+def _gap(a, b):
+    """The distance between two boxes, 0 when they touch."""
+    return math.hypot(max(0.0, a[0] - b[2], b[0] - a[2]), max(0.0, a[1] - b[3], b[1] - a[3]))
+
+
 def _overlap(a, b, margin=0.0):
     return a[0] < b[2] + margin and b[0] < a[2] + margin and \
         a[1] < b[3] + margin and b[1] < a[3] + margin
@@ -167,8 +195,11 @@ def _out_point(item, output=0):
     x, y = _pos(item)
     if isinstance(item, hou.NetworkDot):
         return (x, y)
-    w, _ = _size(item)
+    w, h = _size(item)
     count = max(len(item.outputConnectors()), 1) if hasattr(item, "outputConnectors") else 1
+    if not _vertical(item.parent()):
+        # Outputs go down the right side.
+        return (x + w, y + h - h * (min(output, count - 1) + 0.5) / count)
     if count == 1:
         return (x + w / 2.0, y)
     return (x + w * (min(output, count - 1) + 1) / (count + 1), y)
@@ -186,6 +217,9 @@ def _in_point(item, index=0):
         count = max([c.inputIndex() + 1 for c in item.inputConnections()] + [1])
     count = min(count, 8)
     index = min(index, count - 1)
+    if not _vertical(item.parent()):
+        # Inputs go down the left side.
+        return (x, y + h - h * (index + 0.5) / count)
     return (x + w * (index + 1) / (count + 1), y + h)
 
 
@@ -213,7 +247,10 @@ def _crosses(p, q, rect):
 
 def rounded(network):
     """True when the editor draws the wires of `network` as curves. Shift+S
-    toggles it, and a preference sets it for new networks."""
+    toggles it, and a preference sets it for new networks. The checks take
+    the wires of a network that reads from left to right as straight."""
+    if not _vertical(network):
+        return False
     try:
         return network.connectionDrawStyle() == hou.nodeConnectionDrawStyle.Rounded
     except (hou.Error, AttributeError):
@@ -313,9 +350,9 @@ def _downstream(node):
 
 
 def _vertical(network):
-    """False for a VOP network, which reads from left to right."""
+    """False for a VOP or a Copernicus network, which reads from left to right."""
     try:
-        return network.childTypeCategory() != hou.vopNodeTypeCategory()
+        return network.childTypeCategory().name() not in ("Vop", "Cop")
     except (hou.Error, AttributeError):
         return True
 
@@ -338,7 +375,7 @@ def _terminal(node):
 # ---------------------------------------------------------------------------
 # A whole layout.
 
-def _ranks(nodes, wires):
+def _ranks(nodes, wires, vertical=True):
     """Row of each node: under every input. A source, and a side chain (one
     that ends in a side input), are pulled down to one row above their
     nearest reader, so they sit next to their use. A main chain hangs from
@@ -351,7 +388,7 @@ def _ranks(nodes, wires):
             inputs[reader].append(source)
             readers[source].append(reader)
             port[source, reader] = min(index, port.get((source, reader), index))
-    extra = {node: _extra_rows(node) for node in nodes}
+    extra = {node: _extra_rows(node) if vertical else 0 for node in nodes}
     rank, order, state = {}, [], {}
 
     def spaced_from(node, spaced):
@@ -377,7 +414,7 @@ def _ranks(nodes, wires):
     spaced = set()
     # A node that reads three nodes or more (a Merge) gets a free row above
     # it, where the wires that come in from the sides turn.
-    wide = {node for node in nodes if len(set(inputs[node])) > 2}
+    wide = {node for node in nodes if len(set(inputs[node])) > 2} if vertical else set()
     for _ in range(len(nodes) + 1):
         rank.clear()
         for node in order:
@@ -393,6 +430,15 @@ def _ranks(nodes, wires):
                 port[node, r] > 0 or pulled.get(r) for r in readers[node]))
             if pulled[node]:
                 rank[node] = max(rank[node], min(below) - 1 - extra[node])
+        # A chain hangs from its input when that input stays up, or when that
+        # input fans out to three nodes or more: the branches then start side
+        # by side under it, not as long wires down to their readers.
+        for node in order:
+            if pulled[node] and inputs[node] and not all(
+                    pulled[s] and len(readers[s]) < 3 for s in inputs[node]):
+                pulled[node] = False
+                rank[node] = max(rank[s] + 1 + extra[s] + (s in spaced_from(node, spaced)) +
+                                 (node in wide) for s in inputs[node])
         crowded = {r for node in nodes if not inputs[node] and len(readers[node]) == 1
                    for r in readers[node] if port[node, r] > 0 and r not in spaced and
                    any(port.get((s, r)) == 0 and len(readers[s]) > 1 and
@@ -683,9 +729,15 @@ def layout(parent=None, nodes=None, origin=None):
         origin = (min(p[0] for p in before.values()), max(p[1] for p in before.values()))
     wires = _wires(nodes)
     inside = set(nodes)
-    rank, inputs, readers, extra = _ranks(nodes, wires)
+    # A sticky note goes with the node nearest to it.
+    notes = []
+    for note in parent.stickyNotes():
+        x0, y0, x1, y1 = _shape(note)
+        near = min(nodes, key=lambda node: _gap(box(node), (x0, y0, x1, y1)))
+        notes.append((note, near, note.position() - _pos(near)))
+    rank, inputs, readers, extra = _ranks(nodes, wires, vertical)
 
-    left = origin[0]
+    left, top = origin[0], origin[1]
     for group in sorted(_components(nodes, inputs, readers),
                         key=lambda g: min(before[n][0] for n in g)):
         column, used = _columns(group, rank, inputs, readers, extra, wires)
@@ -699,29 +751,70 @@ def layout(parent=None, nodes=None, origin=None):
             _drop(group, wires)
             left = max(box(node)[2] for node in group) + COLUMN_STEP
         else:
-            # A VOP network reads left to right: rows become columns.
-            heights, widths = {}, {}
-            for node in group:
-                w, h = _size(node)
-                widths[rank[node]] = max(widths.get(rank[node], 0.0), w + 1.0)
-                heights[column[node]] = max(heights.get(column[node], 0.0), h + 0.6)
-            xs, x = {}, origin[0]
-            for r in range(max(rank.values()) + 1):
-                xs[r] = x
-                x += widths.get(r, 1.0)
-            ys, y = {}, origin[1] if left == origin[0] else origin[1] - left
-            for col in range(max(column.values()) + 1):
-                ys[col] = y
-                y -= heights.get(col, 1.0)
-            for node in group:
-                node.setPosition(hou.Vector2(xs[rank[node]], ys[column[node]] - _size(node)[1]))
-            left += origin[1] - y + 2.0
+            top = _horizontal(group, rank, inputs, readers, wires, origin[0], top)
     dots = _route(wires, inside) if vertical else {"made": 0, "removed": 0}
     if vertical:
         dots["made"] += _separate(parent)
     moved = {node.path(): [list(before[node]), list(_pos(node))] for node in nodes
              if (before[node] - _pos(node)).length() > 1e-4}
+    _notes(parent, notes)
+    for frame in parent.networkBoxes():
+        if any(item.path() in moved for item in frame.items() if isinstance(item, hou.Node)):
+            frame.fitAroundContents()
     return {"moved": moved, "dots": dots}
+
+
+def _horizontal(group, rank, inputs, readers, wires, left, top):
+    """Lay out one group of a network that reads from left to right (VOP,
+    Copernicus). The rank of a node is its column. In each column the nodes
+    go in the order of the mean place of the nodes they connect to, so few
+    wires cross, and each node sits level with its inputs where there is
+    room. Returns the bottom of the group, less a gap."""
+    columns = {}
+    for node in sorted(group, key=lambda n: -_pos(n)[1]):
+        columns.setdefault(rank[node], []).append(node)
+    ranks = sorted(columns)
+    place = {}
+    # Where along the side of its reader a wire comes in: inputs go down.
+    port = {(source, reader): (index + 1.0) / (len(reader.inputConnectors()) + 1.0)
+            for source, _, reader, index, _ in wires}
+
+    def number():
+        for nodes in columns.values():
+            place.update({node: i for i, node in enumerate(nodes)})
+
+    def mean(node, others):
+        found = [place[o] for o in others if o in place]
+        return sum(found) / len(found) if found else place[node]
+
+    number()
+    for _ in range(8):
+        for r in ranks[1:]:
+            columns[r].sort(key=lambda n: mean(n, inputs[n]))
+            number()
+        for r in reversed(ranks[:-1]):
+            columns[r].sort(key=lambda n: sum(place[o] + port.get((n, o), 0.5) for o in readers[n]
+                                              if o in place) / max(1, len(readers[n]))
+                            if readers[n] else place[n])
+            number()
+    xs, x = {}, left
+    for r in ranks:
+        xs[r] = x
+        x += max(box(n)[2] - box(n)[0] for n in columns[r]) + 1.0
+    bottom = top
+    for r in ranks:
+        y = top
+        for node in columns[r]:
+            x0, y0, x1, y1 = box(node)
+            h = _size(node)[1]
+            # Level with the mean height of its inputs, when that is lower.
+            want = [_pos(s)[1] + _size(s)[1] for s in inputs[node] if rank[s] < r]
+            level = sum(want) / len(want) if want else y
+            node_top = min(y, level + LINE)
+            node.setPosition(hou.Vector2(xs[r], node_top - LINE - h))
+            y = node_top - (y1 - y0) - 0.4
+        bottom = min(bottom, y)
+    return bottom - 2.0
 
 
 def _segments_cross(p, q, r, t):
@@ -1295,7 +1388,8 @@ def _on_top(one, two, shared=None, runs=None):
 
 def overlaps(network, found=None):
     """Pairs of wire pieces that run on top of each other. Two pieces from one
-    node read as one wire that splits, so they are not a pair."""
+    node read as one wire that splits, and two pieces into one node (the fan
+    into a Merge) read as wires that join, so they are not a pair."""
     found = found if found is not None else legs(network)
     runs = [_runs(leg[2]) for leg in found]
     roots = [_source(leg[0][0])[0] for leg in found]
@@ -1303,7 +1397,7 @@ def overlaps(network, found=None):
     for i, one in enumerate(found):
         for j in range(i + 1, len(found)):
             two = found[j]
-            if roots[i] != roots[j] and _on_top(one[2], two[2], one[2][0] if one[0] == two[0] else None,
+            if roots[i] != roots[j] and one[1] != two[1] and _on_top(one[2], two[2], one[2][0] if one[0] == two[0] else None,
                        (runs[i], runs[j])):
                 pairs.append((one, two))
     return pairs
@@ -1398,6 +1492,11 @@ def problems(network, nodes=None):
         if one[1] in mine or two[1] in mine:
             faults.append(f"the wires into {_label(one[1])} and {_label(two[1])} run on top of "
                           f"each other")
+    for note in network.stickyNotes():
+        cover = next((node for node in children if node in mine and
+                      _overlap(_shape(note), boxes[node])), None)
+        if cover is not None:
+            faults.append(f"the sticky note {note.name()} covers {cover.name()}")
     for dot in dots:
         if dot in mine and not dot.outputConnections():
             faults.append(f"the dot {dot.name()} feeds nothing")
