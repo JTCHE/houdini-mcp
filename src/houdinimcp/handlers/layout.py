@@ -46,14 +46,12 @@ The rules come from networks that the user laid out by hand:
    no node. When a node is in the way, its reader moves down by a part of a
    row until the curve clears; rows do not have to be even. Only far readers
    of a source that feeds many nodes take a lane with dots.
-17. A branch that splits from a node that feeds others stays one row under
-   that node, so its wire turns between the rows.
-18. Two wire pieces from one node may share a stretch: they read as one wire
+17. Two wire pieces from one node may share a stretch: they read as one wire
    that splits.
-19. The across runs into one reader stack by input: the input furthest left
+18. The across runs into one reader stack by input: the input furthest left
    turns highest. A run that would pass behind a node or cross the wire of a
    side source goes higher, between the rows.
-20. `place`, `insert` and `place_chain` never move a node that the user placed,
+19. `place`, `insert` and `place_chain` never move a node that the user placed,
    except down, to clear an overlap or to make the room that a new node needs.
    They return every node that moved, with the old and the new position.
 
@@ -226,25 +224,37 @@ def wire_line(points, curved):
     """The line that the editor draws through `points` (output, dots, input),
     as a list of points, read from screen grabs of Houdini 22. A straight leg
     is a short stub down, a diagonal, and a short stub into the end. A rounded
-    leg goes down to the middle height, across, and down, with round
-    corners."""
+    leg turns across just under its start, with a small corner, and turns
+    down into its end with one wide arc: the across run sits near the
+    source, not at the middle height."""
     line = [points[0]]
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
         if abs(x1 - x0) < 1e-6:
             line.append((x1, y1))
         elif not curved:
             line += [(x0, y0 - STUB), (x1, y1 + STUB), (x1, y1)]
+        elif y1 < y0 - 1e-6:
+            side = 1.0 if x1 > x0 else -1.0
+            first = min(CORNER, abs(x1 - x0) / 2.0, (y0 - y1) / 2.0)
+            run = y0 - first
+            last = min(run - y1, abs(x1 - x0) - first)
+            # A small quarter turn from down to across under the start.
+            line += [(x0 + side * first * (1 - math.cos(a)), y0 - first * math.sin(a))
+                     for a in [step * math.pi / 8.0 for step in range(5)]]
+            # A wide quarter turn from across to down into the end.
+            line += [(x1 - side * last * (1 - math.sin(b)), run - last * (1 - math.cos(b)))
+                     for b in [step * math.pi / 16.0 for step in range(9)]]
+            line.append((x1, y1))
         else:
+            # The end sits above the start: down, across at the middle, up.
             middle = (y0 + y1) / 2.0
             radius = min(CORNER, abs(x1 - x0) / 2.0, abs(y1 - y0) / 2.0)
             side = 1.0 if x1 > x0 else -1.0
-            down = 1.0 if y1 < y0 else -1.0
             turns = [step * math.pi / 8.0 for step in range(5)]
-            # A quarter turn from down to across, then from across to down.
             line += [(x0 + side * radius * (1 - math.cos(a)),
-                      middle + down * radius * (1 - math.sin(a))) for a in turns]
+                      middle - radius * (1 - math.sin(a))) for a in turns]
             line += [(x1 - side * radius * (1 - math.sin(a)),
-                      middle - down * radius * (1 - math.cos(a))) for a in turns]
+                      middle + radius * (1 - math.cos(a))) for a in turns]
             line.append((x1, y1))
     return line
 
@@ -379,11 +389,7 @@ def _ranks(nodes, wires):
             # source with one reader sits in it.
             alone = not inputs[node] and len(readers[node]) == 1
             below = [rank[r] - (r in wide and not alone) for r in readers[node] if r in rank]
-            # A branch that splits from a node that feeds others stays under
-            # that node: its wire then turns between the rows, not across
-            # the nodes of the rows in between.
-            split = any(port[s, node] == 0 and len(readers[s]) > 1 for s in inputs[node])
-            pulled[node] = bool(below) and not split and (not inputs[node] or all(
+            pulled[node] = bool(below) and (not inputs[node] or all(
                 port[node, r] > 0 or pulled.get(r) for r in readers[node]))
             if pulled[node]:
                 rank[node] = max(rank[node], min(below) - 1 - extra[node])
@@ -1014,7 +1020,8 @@ def _stack(stack, wires, lanes, curved):
         direct = [wire_line([_out_point(s, o), _in_point(r, i)], curved)
                   for s, o, r, i, _ in wires if r == reader and i > 0 and
                   (r, i) not in lanes.get((s, o), [])]
-        level = max([(line[0][1] - line[-1][1]) / 2.0 for line in direct
+        # A rounded wire turns across CORNER under its start.
+        level = max([line[0][1] - CORNER - line[-1][1] for line in direct
                      if abs(line[0][0] - line[-1][0]) > 0.3] or [-1.0])
         for _, index, dot in sorted([d for d in stack if d[0] == reader],
                                     key=lambda d: -d[1]):
@@ -1023,15 +1030,22 @@ def _stack(stack, wires, lanes, curved):
             feed = dot.inputItem()
             top = (_pos(feed)[1] if isinstance(feed, hou.NetworkDot) else
                    _out_point(feed, 0)[1]) - 0.2 - end[1]
-            above = max(DOT_ABOVE, 2 * (level + 0.25))
-            while above < top and (
-                    _blocked(wire_line([(x, end[1] + above), end], curved), [reader]) or
-                    any(_lines_cross(wire_line([(x, end[1] + above), end], curved), line)
-                        for line in direct)):
-                above += 0.25
-            above = min(above, top)
+            start = max(DOT_ABOVE, level + 0.25 + CORNER)
+            heights = [start + 0.25 * step for step in range(40) if start + 0.25 * step < top]
+            # Last, just above the reader: the run then passes under the row.
+            heights = ((heights + [top]) if top > DOT_ABOVE else [DOT_ABOVE]) + [0.45, 0.35]
+
+            def piece(above):
+                return wire_line([(x, end[1] + above), end], curved)
+            # The lowest clear height that crosses no side wire, else the
+            # lowest clear one: a crossing reads better than a wire behind a
+            # node.
+            clear = [above for above in heights if not _blocked(piece(above), [reader])]
+            above = next((above for above in clear if not any(
+                _lines_cross(piece(above), line) for line in direct)),
+                clear[0] if clear else heights[0])
             dot.setPosition(hou.Vector2(x, end[1] + above))
-            level = above / 2.0
+            level = above - CORNER
 
 
 # ---------------------------------------------------------------------------
@@ -1330,7 +1344,8 @@ def _shift(network, leg, found):
     # a dot just above the row of the reader.
     levels = [y1 + 0.3 + 0.12 * step for step in range(int((y0 - y1 - 0.45) / 0.12))]
     for level in levels:
-        for x, y in ((x0, 2 * level - y1), (x1, 2 * level - y0)):
+        # A dot under the source sets where the piece after it turns across.
+        for x, y in ((x0, level + CORNER),):
             if not y1 + 0.15 < y < y0 - 0.15:
                 continue
             pieces = [wire_line([line[0], (x, y)], curved), wire_line([(x, y), line[-1]], curved)]
