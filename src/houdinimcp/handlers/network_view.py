@@ -105,6 +105,8 @@ def capture(path=None, paths=None, output=None):
         if _flag(node, "isRenderFlagSet"):
             draw.rectangle([right - quarter, (top + bottom) / 2 if _flag(
                 node, "isDisplayFlagSet") else top, right, bottom], fill=FLAGS["render"])
+        draw.text((right + 0.1 * scale, top - layout.LINE * scale), node.type().description(),
+                  fill=PATH_TEXT, font=font)
         # _text_lines gives the name, the shown comment lines, then the path text.
         comments = len(node.comment().splitlines()) if node.comment() and \
             node.isGenericFlagSet(hou.nodeFlag.DisplayComment) else 0

@@ -42,6 +42,10 @@ LANE = 0.8           # width of a lane column
 COLUMN_STEP = 3.6    # a sibling column when nothing else decides
 # Long wires skip more rows than this before they take a lane.
 SKIP = 2
+# Wire shapes, measured on screen grabs: the stub of a straight wire, and the
+# corner radius of a rounded wire.
+STUB = 0.12
+CORNER = 0.25
 # The editor draws at most this many characters of a comment or path line.
 TRUNCATE = 40
 # The parameter whose value a node type draws under its name.
@@ -84,6 +88,9 @@ def _text_lines(node):
             text = parm.evalAsString()
         except hou.Error:
             text = ""
+        # The editor shows only the file name of a file path.
+        if parm.parmTemplate().stringType() == hou.stringParmType.FileReference:
+            text = text.replace("\\", "/").rsplit("/", 1)[-1]
         if text:
             lines.append(text)
     # The editor truncates comment and path text (preference: truncated).
@@ -170,20 +177,28 @@ def rounded(network):
 
 def wire_line(points, curved):
     """The line that the editor draws through `points` (output, dots, input),
-    as a list of points. A curved leg leaves its start straight down and comes
-    into its end from straight above."""
-    if not curved:
-        return list(points)
+    as a list of points, read from screen grabs of Houdini 22. A straight leg
+    is a short stub down, a diagonal, and a short stub into the end. A rounded
+    leg goes down to the middle height, across, and down, with round
+    corners."""
     line = [points[0]]
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
-        # ponytail: the bend of the Houdini curve is a guess (half the height,
-        # at least 0.5). Match it to the editor if a grab ever disagrees.
-        bend = max(abs(y1 - y0) * 0.5, 0.5)
-        for step in range(1, 17):
-            t = step / 16.0
-            a, b, c, d = (1 - t) ** 3, 3 * t * (1 - t) ** 2, 3 * t * t * (1 - t), t ** 3
-            line.append(((a + b) * x0 + (c + d) * x1,
-                         a * y0 + b * (y0 - bend) + c * (y1 + bend) + d * y1))
+        if abs(x1 - x0) < 1e-6:
+            line.append((x1, y1))
+        elif not curved:
+            line += [(x0, y0 - STUB), (x1, y1 + STUB), (x1, y1)]
+        else:
+            middle = (y0 + y1) / 2.0
+            radius = min(CORNER, abs(x1 - x0) / 2.0, abs(y1 - y0) / 2.0)
+            side = 1.0 if x1 > x0 else -1.0
+            down = 1.0 if y1 < y0 else -1.0
+            turns = [step * math.pi / 8.0 for step in range(5)]
+            # A quarter turn from down to across, then from across to down.
+            line += [(x0 + side * radius * (1 - math.cos(a)),
+                      middle + down * radius * (1 - math.sin(a))) for a in turns]
+            line += [(x1 - side * radius * (1 - math.sin(a)),
+                      middle - down * radius * (1 - math.cos(a))) for a in turns]
+            line.append((x1, y1))
     return line
 
 
