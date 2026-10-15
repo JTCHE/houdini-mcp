@@ -18,7 +18,23 @@ The rules come from networks that the user laid out by hand:
 6. Spacing comes from what the editor draws: the node, its name, its
    displayed comment and its path text. Rows are 1.3 apart; a long comment
    takes more rows.
-7. `place`, `insert` and `place_chain` never move a node that the user placed,
+7. Wires never run on top of each other. They may cross, but as little as
+   possible. A wire piece whose across run lies on another one gets a dot
+   that moves its turn to a free height.
+8. The column under a node is for the wire that goes on to the output, even
+   through a side input. A dead end (a debug Null) sits one row below its
+   source, to the side, never in that column, and never across the main
+   column.
+9. On the main column, a node with two branches or more (a Merge) takes its
+   first branch from the left and the others from the right.
+10. A feeder (a source with no input, read by several nodes through side
+   inputs) gets a lane to its last reader. The feeder that reaches least far
+   sits nearest the readers, so the lanes nest.
+11. A side source whose reader also reads a node that fans out gets its own
+   row: the fan passes above it.
+12. Loose nodes (dead ends, side sources) move to the free spot near their
+   wire where their wires cross the fewest others and pass over no text.
+13. `place`, `insert` and `place_chain` never move a node that the user placed,
    except down, to clear an overlap or to make the room that a new node needs.
    They return every node that moved, with the old and the new position.
 
@@ -45,6 +61,8 @@ SKIP = 2
 # Wire shapes, measured on screen grabs: the stub of a straight wire, and the
 # corner radius of a rounded wire.
 STUB = 0.12
+# The node type label that the editor draws above the name.
+TYPE_LABEL = 0.2
 CORNER = 0.25
 # The editor draws at most this many characters of a comment or path line.
 TRUNCATE = 40
@@ -85,9 +103,10 @@ def _text_lines(node):
     parm = node.parm(name) if name else None
     if parm is not None:
         try:
-            text = parm.evalAsString()
+            # The editor shows the raw text: $F4 stays $F4.
+            text = parm.unexpandedString()
         except hou.Error:
-            text = ""
+            text = parm.evalAsString()
         # The editor shows only the file name of a file path.
         if parm.parmTemplate().stringType() == hou.stringParmType.FileReference:
             text = text.replace("\\", "/").rsplit("/", 1)[-1]
@@ -107,7 +126,9 @@ def box(item, full=True):
     if not lines:
         return [x, y, x + w, y + h]
     width = max(len(line) for line in lines) * CHAR
-    return [x, min(y, y + h - LINE * len(lines)), x + w + 0.1 + width, y + h]
+    # The type label sits above the name.
+    label = TYPE_LABEL if full else 0.0
+    return [x, min(y, y + h - LINE * len(lines)), x + w + 0.1 + width, y + h + label]
 
 
 def _shape(item):
@@ -139,6 +160,10 @@ def _in_point(item, index=0):
     if isinstance(item, hou.NetworkDot):
         return (x, y)
     count = max(len(item.inputConnectors()), 1) if hasattr(item, "inputConnectors") else 1
+    if count > 64:
+        # A node with any number of inputs (Merge, Switch) spreads the wires
+        # that it has over its width.
+        count = max([c.inputIndex() + 1 for c in item.inputConnections()] + [1])
     count = min(count, 8)
     index = min(index, count - 1)
     return (x + w * (index + 1) / (count + 1), y + h)
@@ -297,6 +322,10 @@ def _ranks(nodes, wires):
     extra = {node: _extra_rows(node) for node in nodes}
     rank, order, state = {}, [], {}
 
+    def spaced_from(node, spaced):
+        """The input 0 source of `node` when `node` needs a free row."""
+        return [s for s in inputs[node] if node in spaced and port[s, node] == 0]
+
     def visit(node):
         if state.get(node) == 2:
             return
@@ -310,15 +339,29 @@ def _ranks(nodes, wires):
 
     for node in nodes:
         visit(node)
-    for node in order:
-        rank[node] = max([rank[s] + 1 + extra[s] for s in inputs[node] if s in rank] or [0])
-    pulled = {}
-    for node in reversed(order):
-        below = [rank[r] for r in readers[node] if r in rank]
-        pulled[node] = bool(below) and (not inputs[node] or all(
-            port[node, r] > 0 or pulled.get(r) for r in readers[node]))
-        if pulled[node]:
-            rank[node] = max(rank[node], min(below) - 1 - extra[node])
+    # A reader that leaves a free row above it for its side source: the
+    # source of its input 0 fans out to other nodes too, and those wires
+    # must pass above the side source, not through its row.
+    spaced = set()
+    for _ in range(len(nodes) + 1):
+        rank.clear()
+        for node in order:
+            rank[node] = max([rank[s] + 1 + extra[s] + (s in spaced_from(node, spaced))
+                              for s in inputs[node] if s in rank] or [0])
+        pulled = {}
+        for node in reversed(order):
+            below = [rank[r] for r in readers[node] if r in rank]
+            pulled[node] = bool(below) and (not inputs[node] or all(
+                port[node, r] > 0 or pulled.get(r) for r in readers[node]))
+            if pulled[node]:
+                rank[node] = max(rank[node], min(below) - 1 - extra[node])
+        crowded = {r for node in nodes if not inputs[node] and len(readers[node]) == 1
+                   for r in readers[node] if port[node, r] > 0 and r not in spaced and
+                   any(port.get((s, r)) == 0 and len(readers[s]) > 1 and
+                       rank[s] + extra[s] >= rank[node] for s in inputs[r])}
+        if not crowded:
+            break
+        spaced |= crowded
     top = min(rank.values())
     return {node: value - top for node, value in rank.items()}, inputs, readers, extra
 
@@ -408,6 +451,11 @@ def _columns(group, rank, inputs, readers, extra, wires):
 
     strict = [True]
 
+    def ports_of(source):
+        """(input index, reader) of every wire out of `source`."""
+        return [(index, reader) for reader, pairs in ports.items()
+                for index, other in pairs if other == source]
+
     def free(col, cells):
         return not (used.get(col, set()) & cells)
 
@@ -421,17 +469,42 @@ def _columns(group, rank, inputs, readers, extra, wires):
             col += 1
         return col
 
+    edge = [0]           # the leftmost column in use
+
+    def width(source):
+        """The columns that `source` and its inputs take, from a trial."""
+        saved = dict(column), {col: set(cells) for col, cells in used.items()}
+        take(source, 10 ** 6)
+        span = grow(source) - 10 ** 6
+        column.clear(), column.update(saved[0])
+        used.clear(), used.update(saved[1])
+        return span
+
     def grow(node):
         """Place the inputs that are not placed yet, above `node`. Returns the
-        rightmost column that `node` and what it placed use."""
+        rightmost column that `node` and what it placed use.
+
+        On the main column, a node with two branches or more (a side input
+        whose source has its own inputs) puts its first branch on the left:
+        the branches spread on both sides, and their wires come in from both
+        sides, not on top of each other."""
         right = column[node]
+        branches = [source for index, source in ports.get(node, [])
+                    if index and inputs[source] and source not in column]
         for index, source in sorted(ports.get(node, []), key=lambda pair: pair[0]):
             # Placed already (a source with more readers), or a loop.
             if source in column or rank[source] >= rank[node]:
                 continue
             # A node goes above the reader that continues its chain, so a
             # side input does not take it from there.
-            if strict[0] and owner.get(source, node) != node:
+            if strict[0] and (owner.get(source, node) != node or source in feeders):
+                continue
+            if column[node] == 0 and len(branches) > 1 and source == branches[0]:
+                col = edge[0] - 1 - width(source)
+                edge[0] = col
+                take(source, col)
+                used[col].update(set(range(rank[source], rank[node])))
+                grow(source)
                 continue
             start = column[node] if index == 0 else right + 1
             # The column holds the source and every row down to its reader,
@@ -443,10 +516,29 @@ def _columns(group, rank, inputs, readers, extra, wires):
             right = max(right, grow(source))
         return right
 
+    # A feeder is a source with no input that several nodes read through a
+    # side input, like an IN_ Object Merge of a body. It gets a lane down to
+    # its last reader. The feeder that reaches least far sits nearest the
+    # readers, so the lanes nest and their wires do not cross other lanes.
+    reach = {}
+    for node in group:
+        mine = [r for r in readers[node] if r in rows]
+        if not inputs[node] and len(mine) > 1 and                 all(index for index, source in ports_of(node)):
+            reach[node] = max(rank[r] for r in mine)
+    feeders = set(reach)
+
     sinks = [node for node in group if not [r for r in readers[node] if r in rows]]
     main = _main_sink(sinks, rank)
     take(main, 0)
     grow(main)
+    for feeder in sorted(feeders, key=lambda node: (reach[node], rank[node])):
+        placed = [column[r] for r in readers[feeder] if r in column]
+        if feeder in column or not placed:
+            continue
+        cells = set(range(rank[feeder], reach[feeder] + 1))
+        col = first_free(max(placed) + 1, cells)
+        take(feeder, col)
+        used[col].update(cells)
     # The other ends: under their first input when the column is free there,
     # else in the next free column to its right.
     for sink in sorted([s for s in sinks if s != main], key=rank.get):
@@ -454,6 +546,21 @@ def _columns(group, rank, inputs, readers, extra, wires):
             continue
         sources = [s for i, s in sorted(ports.get(sink, []), key=lambda p: p[0]) if s in column]
         start = column[sources[0]] if sources else 0
+        # A dead end does not take the column under its source from the wire
+        # that goes on to the output: it sits one column to the side.
+        if sources and len([r for r in readers[sources[0]] if r in rows]) > 1:
+            start += 1
+            if start <= 0 and not free(start, rows[sink]):
+                # Left of the main column: open a column between the source
+                # and the main column, so the dead end stays on its side and
+                # its wire crosses no other.
+                moved = {node: col - 1 for node, col in column.items() if col < start}
+                column.update(moved)
+                shifted = {(col - 1 if col < start else col): cells
+                           for col, cells in used.items()}
+                used.clear(), used.update(shifted)
+                edge[0] -= 1
+                start -= 1
         take(sink, first_free(start, rows[sink]))
         grow(sink)
     # A node whose chain reader was never reached: above any placed reader.
@@ -470,17 +577,22 @@ def _columns(group, rank, inputs, readers, extra, wires):
 def _column_x(group, column, used, rank, extra, left):
     """The x of each column. A column keeps clear of what the columns on its
     left draw in the rows that it uses: its nodes and the wires that run down
-    it. A long name or path in a row far away does not push it."""
+    it. A long name or path in a row far away does not push it. A column left
+    of the main one (a negative column) keeps clear of the columns on its
+    right the same way. The leftmost column starts at `left`."""
     drawn = {}        # column -> [(rows, width)] of its nodes, text included
     for node in group:
         b = box(node)
         rows = set(range(rank[node], rank[node] + 1 + extra[node]))
         drawn.setdefault(column[node], []).append((rows, b[2] - b[0]))
     xs = {}
-    for col in range(max(column.values()) + 1):
+    low, high = min(column.values()), max(column.values())
+    for col in range(0, high + 1):
         mine = used.get(col, set())
-        x = xs[col - 1] + LANE if col else left
-        for other in range(col):
+        x = xs[col - 1] + LANE if col else 0.0
+        for other in range(low, col):
+            if other not in xs:
+                continue
             near = {r + d for r in mine for d in (-1, 0, 1)}
             for rows, width in drawn.get(other, []):
                 if rows & near:
@@ -489,7 +601,19 @@ def _column_x(group, column, used, rank, extra, left):
                 # A wire runs down that column in these rows.
                 x = max(x, xs[other] + _NODE_WIDTH + GAP)
         xs[col] = x
-    return xs
+    for col in range(-1, low - 1, -1):
+        mine = used.get(col, set())
+        x = xs[col + 1] - LANE
+        for other in range(col + 1, high + 1):
+            theirs = {r + d for r in used.get(other, set()) for d in (-1, 0, 1)}
+            for rows, width in drawn.get(col, []):
+                if rows & theirs:
+                    x = min(x, xs[other] - width - GAP)
+            if used.get(other, set()) & mine:
+                x = min(x, xs[other] - _NODE_WIDTH - GAP)
+        xs[col] = x
+    shift = left - min(xs.values())
+    return {col: x + shift for col, x in xs.items()}
 
 
 _NODE_WIDTH = 1.13
@@ -507,6 +631,8 @@ def layout(parent=None, nodes=None, origin=None):
     if not nodes:
         return {"moved": {}, "dots": {"made": 0, "removed": 0}}
     parent = nodes[0].parent()
+    if not parent.isEditable():
+        raise ValueError(f"{parent.path()} is inside a locked asset: its nodes cannot move.")
     vertical = _vertical(parent)
     before = {node: _pos(node) for node in nodes}
     if origin is None:
@@ -523,6 +649,7 @@ def layout(parent=None, nodes=None, origin=None):
             xs = _column_x(group, column, used, rank, extra, left)
             for node in group:
                 node.setPosition(hou.Vector2(xs[column[node]], origin[1] - rank[node] * ROW))
+            _nudge(group, wires, inputs, readers, column)
             left = max(box(node)[2] for node in group) + COLUMN_STEP
         else:
             # A VOP network reads left to right: rows become columns.
@@ -543,9 +670,114 @@ def layout(parent=None, nodes=None, origin=None):
                 node.setPosition(hou.Vector2(xs[rank[node]], ys[column[node]] - _size(node)[1]))
             left += origin[1] - y + 2.0
     dots = _route(wires, inside) if vertical else {"made": 0, "removed": 0}
+    if vertical:
+        dots["made"] += _separate(parent)
     moved = {node.path(): [list(before[node]), list(_pos(node))] for node in nodes
              if (before[node] - _pos(node)).length() > 1e-4}
     return {"moved": moved, "dots": dots}
+
+
+def _segments_cross(p, q, r, t):
+    def side(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return side(p, q, r) * side(p, q, t) < 0 and side(r, t, p) * side(r, t, q) < 0
+
+
+def _extent(line):
+    xs, ys = [p[0] for p in line], [p[1] for p in line]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _lines_cross(one, two, first=None, second=None):
+    """How many times two drawn lines cross. `first` and `second` are their
+    extents when the caller has them."""
+    a, b = first or _extent(one), second or _extent(two)
+    if a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]:
+        return 0
+    return sum(_segments_cross(p, q, r, t)
+               for p, q in zip(one, one[1:]) for r, t in zip(two, two[1:]))
+
+
+def _nudge(group, wires, inputs, readers, column):
+    """Move the loose nodes to the free spot near their wire where their
+    wires cross the fewest others: a dead end (a node that feeds nothing and
+    is not the output) near its source, and a source with no input near its
+    reader, a little lower when that clears a wire that passes over its
+    row."""
+    inside = set(group)
+    mine = [w for w in wires if w[0] in inside and w[2] in inside]
+    if not mine:
+        return
+    curved = rounded(group[0].parent())
+    main = [n for n in group if not readers[n]]
+    main = _main_sink(main, {n: -_pos(n)[1] for n in group}) if main else None
+    side = {w[0] for w in mine if w[3] > 0}
+    loose = [n for n in group if (not readers[n] and n != main and len(inputs[n]) == 1) or
+             (not inputs[n] and len(readers[n]) == 1 and n in side)]
+
+    def line(wire):
+        source, output, reader, index, _ = wire
+        return wire_line([_out_point(source, output), _in_point(reader, index)], curved)
+
+    def cost(node, base, lines, shapes, boxes):
+        """The price of where `node` is now. `lines`, `shapes` and `boxes`
+        hold the other wires and nodes, which do not move; `base` is the
+        position that the box of the node was read at."""
+        x, y = _pos(node)
+        dx, dy = x - base[0], y - base[1]
+        own = [w for w in mine if node in (w[0], w[2])]
+        moved = {id(w): line(w) for w in own}
+        rest = [w for w in mine if node not in (w[0], w[2])]
+        shape = [v + d for v, d in zip(shapes[node], (dx, dy, dx, dy))]
+        mine_box = [v + d for v, d in zip(boxes[node], (dx, dy, dx, dy))]
+        spans = {key: _extent(value) for key, value in moved.items()}
+        crossings = sum(_lines_cross(moved[id(a)], lines[id(b)], spans[id(a)], extents[id(b)])
+                        for a in own for b in rest if a[0] != b[0])
+        behind = sum(1 for w in rest if _crosses_line(lines[id(w)], shape))
+        behind += sum(1 for w in own for other in group if other not in (w[0], w[2]) and
+                      other != node and _crosses_line(moved[id(w)], shapes[other]))
+        # A wire over the drawn text of the node is hard to read.
+        text = sum(1 for w in rest if _crosses_line(lines[id(w)], mine_box))
+        overlap = sum(1 for other in group if other != node and
+                      _overlap(mine_box, boxes[other], 0.1))
+        partner = (inputs[node] or readers[node])[0]
+        distance = abs(x - _pos(partner)[0]) + abs(y - _pos(partner)[1])
+        return 100 * overlap + 30 * behind + 10 * crossings + 5 * text + distance
+
+    for _ in range(2):
+        for node in loose:
+            lines = {id(w): line(w) for w in mine}
+            extents = {key: _extent(value) for key, value in lines.items()}
+            shapes = {other: _shape(other) for other in group}
+            boxes = {other: box(other) for other in group}
+            base = _pos(node)
+            partner = (inputs[node] or readers[node])[0]
+            px, py = _pos(partner)
+            if inputs[node]:
+                heights = [py - ROW, py - ROW * 1.5, py - ROW * 2]
+            else:
+                # One row above the reader, or down to half a row above it.
+                heights = [py + ROW, py + ROW * 0.75, py + ROW * 0.5]
+            near = [other for other in group if other != node and
+                    abs(_pos(other)[1] - py) < ROW * 2.5]
+            width = boxes[node][2] - boxes[node][0]
+            # A source only moves down, in its column: a lane may pass there.
+            xs = {base[0]} if not inputs[node] else                 {px} | {boxes[other][2] + GAP for other in near} |                 {boxes[other][0] - width - GAP for other in near}
+            best, spot = cost(node, base, lines, shapes, boxes), base
+            for x in xs:
+                for y in heights:
+                    node.setPosition(hou.Vector2(x, y))
+                    value = cost(node, base, lines, shapes, boxes)
+                    if value < best - 1e-6:
+                        best, spot = value, (x, y)
+            node.setPosition(hou.Vector2(*spot))
+
+
+def _crosses_line(line, rect):
+    xs, ys = [p[0] for p in line], [p[1] for p in line]
+    if max(xs) < rect[0] or min(xs) > rect[2] or max(ys) < rect[1] or min(ys) > rect[3]:
+        return False
+    return any(_crosses(p, q, rect) for p, q in zip(line, line[1:]))
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +813,11 @@ def _route(wires, inside):
             continue
         p, q = _out_point(source, output), _in_point(reader, index)
         rows = (p[1] - q[1]) / ROW
-        straight = (rows <= SKIP + 0.5 or abs(p[0] - q[0]) < 0.3) and \
+        # A wire that skips rows takes a lane when its source feeds other
+        # nodes too: one lane, a dot for each reader. Alone, it goes straight
+        # when nothing is in the way.
+        alone = len([w for w in wires if w[0] == source and w[1] == output]) == 1
+        straight = (rows <= SKIP + 0.5 or abs(p[0] - q[0]) < 0.3 or alone) and \
             not _blocked(wire_line([p, q], curved), [source, reader] + list(old))
         if straight:
             if dots:
@@ -831,6 +1067,129 @@ def place_chain(chain, reader, index=0):
 # ---------------------------------------------------------------------------
 # Faults.
 
+def _label(item):
+    return item.name() if isinstance(item, hou.Node) else f"a dot under {_source(item)[0].name()}"
+
+
+def legs(network):
+    """[((source item, output), reader item, line)] for every wire piece
+    between two items (a node or a dot), as the editor draws it."""
+    curved = rounded(network)
+    found = []
+    for item in list(network.children()) + list(network.networkDots()):
+        try:
+            connections = item.inputConnections()
+        except hou.Error:
+            continue
+        for connection in connections:
+            source, output = connection.inputItem(), connection.outputIndex()
+            if source is None:
+                continue
+            start = _pos(source) if isinstance(source, hou.NetworkDot) else \
+                _out_point(source, output)
+            end = _pos(item) if isinstance(item, hou.NetworkDot) else \
+                _in_point(item, connection.inputIndex())
+            found.append(((source, output), item, wire_line([start, end], curved)))
+    return found
+
+
+def _runs(line):
+    """The straight horizontal and vertical runs of a drawn line:
+    (axis, level, low, high). Axis 0 is horizontal."""
+    found = []
+    for (x0, y0), (x1, y1) in zip(line, line[1:]):
+        if abs(y1 - y0) < 1e-6 and abs(x1 - x0) > 0.05:
+            found.append((0, y0, min(x0, x1), max(x0, x1)))
+        elif abs(x1 - x0) < 1e-6 and abs(y1 - y0) > 0.05:
+            found.append((1, x0, min(y0, y1), max(y0, y1)))
+    return found
+
+
+def _on_top(one, two, shared=None, runs=None):
+    """True when two drawn lines share a stretch: the same direction, about
+    the same level, and a common length. A long pair of parallel runs reads as
+    one line from further apart. `shared` is the start point of two pieces
+    from one output: the run down from it is one wire that splits. `runs`
+    holds the runs of both lines when the caller has them."""
+    first, second = runs or (_runs(one), _runs(two))
+    if shared:
+        def keep(run):
+            return not (run[0] == 1 and abs(run[1] - shared[0]) < 1e-3 and
+                        abs(run[3] - shared[1]) < 1e-3)
+        first, second = [r for r in first if keep(r)], [r for r in second if keep(r)]
+    for a in first:
+        for b in second:
+            common = min(a[3], b[3]) - max(a[2], b[2])
+            if a[0] == b[0] and common > 0.15 and                     abs(a[1] - b[1]) < (0.2 if common > 1.5 else 0.1):
+                return True
+    return False
+
+
+def overlaps(network, found=None):
+    """Pairs of wire pieces that run on top of each other."""
+    found = found if found is not None else legs(network)
+    runs = [_runs(leg[2]) for leg in found]
+    pairs = []
+    for i, one in enumerate(found):
+        for j in range(i + 1, len(found)):
+            two = found[j]
+            if _on_top(one[2], two[2], one[2][0] if one[0] == two[0] else None,
+                       (runs[i], runs[j])):
+                pairs.append((one, two))
+    return pairs
+
+
+def _separate(network, limit=40):
+    """Move the across run of a wire piece that runs on top of another one:
+    a new dot under its source, or above its reader, sets the height where
+    it turns. Returns the number of dots made."""
+    made, failed = 0, set()
+    for _ in range(limit):
+        found = legs(network)
+        pairs = [pair for pair in overlaps(network, found)
+                 if (pair[0][0], pair[0][1], pair[1][0], pair[1][1]) not in failed]
+        if not pairs:
+            break
+        one, two = pairs[0]
+        if _shift(network, two, found) or _shift(network, one, found):
+            made += 1
+        else:
+            failed.add((one[0], one[1], two[0], two[1]))
+    return made
+
+
+def _shift(network, leg, found):
+    (source, output), reader, line = leg
+    if not isinstance(reader, hou.Node) or _vertical(network) is False:
+        return False
+    (x0, y0), (x1, y1) = line[0], line[-1]
+    if abs(x1 - x0) < 0.2 or y1 > y0 - 0.6:
+        return False
+    curved = rounded(network)
+    index = next(c.inputIndex() for c in reader.inputConnections()
+                 if c.inputItem() == source and c.outputIndex() == output)
+    others = [other for other in found if other is not leg]
+    skip = [source, reader] + list(network.networkDots())
+    # Heights for the across run, nearest the reader first, as the user puts
+    # a dot just above the row of the reader.
+    levels = [y1 + 0.3 + 0.12 * step for step in range(int((y0 - y1 - 0.45) / 0.12))]
+    for level in levels:
+        for x, y in ((x0, 2 * level - y1), (x1, 2 * level - y0)):
+            if not y1 + 0.15 < y < y0 - 0.15:
+                continue
+            pieces = [wire_line([line[0], (x, y)], curved), wire_line([(x, y), line[-1]], curved)]
+            if any(_blocked(piece, skip) for piece in pieces) or any(
+                    _on_top(piece, other[2], line[0] if other[0] == leg[0] else None)
+                    for piece in pieces for other in others):
+                continue
+            dot = network.createNetworkDot()
+            dot.setPosition(hou.Vector2(x, y))
+            dot.setInput(source, output)
+            reader.setInput(index, dot)
+            return True
+    return False
+
+
 def problems(network, nodes=None):
     """Layout faults: a node above its input, drawn boxes that overlap (names,
     comments and path text included), a wire that passes behind a node, a
@@ -864,6 +1223,10 @@ def problems(network, nodes=None):
             if (a in mine or b in mine) and _overlap(boxes[a], boxes[b]):
                 faults.append(f"{a.name()} and {b.name()} overlap: a name, a comment or a "
                               f"path covers the other")
+    for one, two in overlaps(network):
+        if one[1] in mine or two[1] in mine:
+            faults.append(f"the wires into {_label(one[1])} and {_label(two[1])} run on top of "
+                          f"each other")
     for dot in dots:
         if dot in mine and not dot.outputConnections():
             faults.append(f"the dot {dot.name()} feeds nothing")
