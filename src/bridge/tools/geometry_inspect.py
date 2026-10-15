@@ -14,7 +14,8 @@ PARAMS = {
             "fails, and each result names its path.",
     "mode": 'One of "summary", "points", "prims", "attrib", "groups", "group_members", '
             '"bbox", "intrinsics", "nearest", "skeleton", "compare", "try", "volume_stats", '
-            '"volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export".',
+            '"volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export", '
+            '"fingerprint", "stretch", "inside", "crossings".',
     "start": "points, prims, attrib: the first element. Page with it.",
     "count": "points, prims: how many elements. Keep it small: a large read is slow.",
     "attribs": 'points: the attributes to return, for example ["P", "Cd"].',
@@ -34,11 +35,14 @@ PARAMS = {
     "unique": "attrib: return each value that occurs and how many elements carry it. That "
               "is how you find the pieces in a geometry.",
     "against": "compare: the node to compare with. volume_compare: the field whose bands "
-               "hold the field `name`.",
+               "hold the field `name`. fingerprint: the name of a saved fingerprint to "
+               "compare with. stretch: the rest mesh. inside: the closed mesh. crossings: a "
+               "second geometry, such as the body.",
     "match_attrib": "compare: the attribute that pairs the points of the two nodes, not "
                     "their order.",
     "pattern": "skeleton: keep the joints whose name matches.",
-    "name": "volume_stats: one volume to read. volume_voxels, volume_compare: the field.",
+    "name": "volume_stats: one volume to read. volume_voxels, volume_compare: the field. "
+            "fingerprint: save the result under this name.",
     "names": "volume_sample: the fields to read.",
     "positions": "volume_sample: the [x, y, z] points to read at.",
     "from_node": "volume_sample: read at the points of this node. volume_compare: the node "
@@ -49,11 +53,17 @@ PARAMS = {
             "of band edges, for example [-1, 0, 0.05, 0.15, 0.25].",
     "limit": "attrib: how many values (10). volume_voxels: how many numbers before the array "
              "is thinned. volume_sample: return the values when there are at most this many "
-             "(1000).",
+             "(1000). stretch: how many of the worst edges (10).",
     "reduce": 'volume_voxels: one answer instead of the array: "sum", "mean", "max", "min", '
               '"project_x", "project_y" or "project_z".',
     "threshold": "volume_stats, volume_sample: count the voxels below and above it. "
-                 "volume_stats also gives the world box of the voxels above it.",
+                 "volume_stats also gives the world box of the voxels above it. stretch: the "
+                 "growth to count, 0.1 (10 %) by default. inside: count the points deeper "
+                 "than this distance.",
+    "renamed": 'fingerprint: {"old path": "new path"} for the nodes that a refactor renamed '
+               "or moved.",
+    "split_by": 'crossings: a prim attribute, such as "name", whose values are the parts '
+                "that the count pairs.",
 }
 
 
@@ -68,7 +78,8 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
          pattern: str = None, name: str = None, names: List[str] = None,
          positions: List[List[float]] = None, from_node: str = None,
          steps: List[Dict[str, Any]] = None, bins: Union[int, List[float]] = None, limit: int = None,
-         reduce: str = None, threshold: float = None) -> str:
+         reduce: str = None, threshold: float = None, renamed: Dict[str, str] = None,
+         split_by: str = None) -> str:
     """Read the geometry that a node produces. This cooks the node.
 
     Use it to confirm that a node made what you expected: the point count, an
@@ -140,6 +151,22 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
                            "bgeo" or another that Houdini writes, and `file`
                            is the file path. A file that is there is
                            overwritten. The other modes write nothing.
+        "fingerprint"    — for each node of `path` and each frame: counts,
+                           bounds, a hash of P and of the attribute names.
+                           `name` saves it. After a refactor, call it again
+                           with `against` (the saved name) and `renamed`, and
+                           read `compare`: what differs, or same=true.
+        "stretch"        — how much each edge grew against the same edge of
+                           the rest mesh `against`: max, percentiles, the
+                           count over `threshold`, the worst edges and the
+                           places where they are, on the rest mesh.
+        "inside"         — the points of `path` inside the closed mesh
+                           `against`: the count, the depth, where they are.
+                           Run it before a cloth sim.
+        "crossings"      — the points where the surfaces of `path` cross,
+                           themselves or `against`, counted for each pair of
+                           parts of `split_by`. A part with itself is a self
+                           crossing.
 
     Returns JSON. A large read is slow: keep `count` small and page with
     `start`.
@@ -152,5 +179,6 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "file": file, "output": output, "frames": frames, "unique": unique, "against": against,
         "match_attrib": match_attrib, "pattern": pattern, "name": name, "names": names,
         "positions": positions, "from_node": from_node, "steps": steps, "bins": bins,
-        "limit": limit, "reduce": reduce, "threshold": threshold,
+        "limit": limit, "reduce": reduce, "threshold": threshold, "renamed": renamed,
+        "split_by": split_by,
     }, timeout=300.0)

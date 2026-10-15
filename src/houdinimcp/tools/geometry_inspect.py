@@ -4,13 +4,14 @@ Every mode takes `frames`. The result then holds one answer for each frame, and
 the playbar does not move: a read never changes the frame that the user is on.
 """
 from . import unknown_mode
-from ..handlers import cops, geometry, timing, volumes
+from ..handlers import cops, geometry, measure, timing, volumes
 
 MUTATES = False
 
 MODES = ("summary", "points", "prims", "attrib", "groups", "group_members", "bbox",
          "intrinsics", "nearest", "skeleton", "compare", "try", "volume_stats",
-         "volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export")
+         "volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export",
+         "fingerprint", "stretch", "inside", "crossings")
 
 
 def run(path, mode="summary", frames=None, output=None, **options):
@@ -25,6 +26,10 @@ def run(path, mode="summary", frames=None, output=None, **options):
             return run(path, mode, frames, None, **options)
         finally:
             geometry.OUTPUTS.clear()
+    if mode == "fingerprint":
+        return measure.fingerprint([path] if isinstance(path, str) else path, frames,
+                                   options.get("name"), options.get("against"),
+                                   options.get("renamed"))
     if isinstance(path, str):
         return _read(path, mode, frames, options)
     results = []
@@ -115,6 +120,15 @@ def _one(path, mode, options, frame=None):
                 "layer": cops.get_cop_layer(path, want("plane_name", "C"))}
     if mode == "volume":
         return cops.get_cop_vdb(path)
+    if mode in ("stretch", "inside"):
+        if not want("against"):
+            raise ValueError(f"mode '{mode}' needs against: the rest mesh for stretch, the "
+                             f"closed mesh for inside.")
+        if mode == "stretch":
+            return measure.stretch(path, want("against"), want("threshold"), want("limit"))
+        return measure.inside(path, want("against"), want("threshold"))
+    if mode == "crossings":
+        return measure.crossings(path, want("against"), want("split_by"))
     if mode == "export":
         return geometry.geo_export(path, want("format", "obj"), want("file"), frame)
     raise unknown_mode(mode, MODES)

@@ -420,7 +420,7 @@ def try_nodes(input_path, steps, frame=None, attrib_name=None, attrib_class="poi
             output = hou.Geometry()
             verb.execute(output, [current])
         else:
-            output = _run_as_node(type_name, parameters, current, index)
+            output = run_as_node(type_name, parameters, [current], f"Step {index}")
         ran.append({"step": index, "node_type": type_name,
                     "points": len(output.points()), "prims": len(output.prims())})
         if not verb:
@@ -464,25 +464,27 @@ def _menu_indices(node_type, parameters, step):
     return found
 
 
-def _run_as_node(type_name, parameters, geometry, step):
-    """One step as a real node in a hidden network that is deleted after, for
-    a type with no verb. Undo does not record it."""
+def run_as_node(type_name, parameters, geometries, step):
+    """A node of `type_name` on `geometries` (one for each input), as a real
+    node in a hidden network that is deleted after: for a type with no verb.
+    Undo does not record it."""
     with hou.undos.disabler():
         box = hou.node("/obj").createNode("geo", "__mcp_try")
         try:
             box.hide(True)
-            stash = box.createNode("stash")
-            stash.parm("stash").set(geometry)
             node = box.createNode(type_name)
-            node.setInput(0, stash)
+            for index, geometry in enumerate(geometries):
+                stash = box.createNode("stash")
+                stash.parm("stash").set(geometry)
+                node.setInput(index, stash)
             node.setParms(parameters)
             try:
                 node.cook(force=True)
             except hou.OperationFailed as error:
-                raise ValueError(f"Step {step}: {type_name} did not cook: "
+                raise ValueError(f"{step}: {type_name} did not cook: "
                                  f"{'; '.join(node.errors()) or error}") from error
             if node.errors():
-                raise ValueError(f"Step {step}: {type_name} did not cook: "
+                raise ValueError(f"{step}: {type_name} did not cook: "
                                  f"{'; '.join(node.errors())}")
             output = hou.Geometry()
             output.merge(node.geometry())
