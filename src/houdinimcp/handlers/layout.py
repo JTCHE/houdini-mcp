@@ -126,8 +126,10 @@ def box(item, full=True):
     if not lines:
         return [x, y, x + w, y + h]
     width = max(len(line) for line in lines) * CHAR
-    # The type label sits above the name.
+    # The type label sits above the name, in a smaller font.
     label = TYPE_LABEL if full else 0.0
+    if full:
+        width = max(width, len(item.type().description()) * CHAR * 0.85)
     return [x, min(y, y + h - LINE * len(lines)), x + w + 0.1 + width, y + h + label]
 
 
@@ -442,6 +444,11 @@ def _columns(group, rank, inputs, readers, extra, wires):
 
     owner = {}
     for source, found in candidates.items():
+        # A dead end (a reader that feeds nothing) does not take the column
+        # from a reader through a side input that goes on to the output.
+        if all(not downstream(r) for r in found) and \
+                any(r not in found for r in readers[source] if r in rows):
+            continue
         ends = [r for r in found if not any(o in downstream(r) for o in found if o != r)] \
             or found
         if not inputs[source]:
@@ -738,10 +745,15 @@ def _nudge(group, wires, inputs, readers, column):
                       other != node and _crosses_line(moved[id(w)], shapes[other]))
         # A wire over the drawn text of the node is hard to read.
         text = sum(1 for w in rest if _crosses_line(lines[id(w)], mine_box))
+        text += sum(1 for w in own for other in group if other != node and
+                    _crosses_line(moved[id(w)], boxes[other]))
         overlap = sum(1 for other in group if other != node and
                       _overlap(mine_box, boxes[other], 0.1))
         partner = (inputs[node] or readers[node])[0]
-        distance = abs(x - _pos(partner)[0]) + abs(y - _pos(partner)[1])
+        # Near the partner: a dead end one row under its source, a source
+        # one row above its reader.
+        ideal = _pos(partner)[1] + (ROW if not inputs[node] else -ROW)
+        distance = abs(x - _pos(partner)[0]) + abs(y - ideal)
         return 100 * overlap + 30 * behind + 10 * crossings + 5 * text + distance
 
     for _ in range(2):
@@ -762,7 +774,10 @@ def _nudge(group, wires, inputs, readers, column):
                     abs(_pos(other)[1] - py) < ROW * 2.5]
             width = boxes[node][2] - boxes[node][0]
             # A source only moves down, in its column: a lane may pass there.
-            xs = {base[0]} if not inputs[node] else                 {px} | {boxes[other][2] + GAP for other in near} |                 {boxes[other][0] - width - GAP for other in near}
+            # A dead end stays right of its source, away from the column of
+            # the chain it leaves.
+            xs = {base[0]} if not inputs[node] else                 {x for x in {px} | {boxes[other][2] + GAP for other in near} |
+                 {boxes[other][0] - width - GAP for other in near} if x >= px - 1e-6}
             best, spot = cost(node, base, lines, shapes, boxes), base
             for x in xs:
                 for y in heights:
