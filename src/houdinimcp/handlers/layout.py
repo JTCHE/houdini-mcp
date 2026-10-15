@@ -42,12 +42,18 @@ The rules come from networks that the user laid out by hand:
    where the wires from the sides turn. A source with one reader sits in that
    row; a side chain ends above it.
 15. A dead end sits right of the name of its source.
-16. A wire that skips rows into one reader drops straight into its input
-   through one dot, and turns under the text of its source.
-17. The across runs into one reader stack by input: the input furthest left
+16. Trust the curve: a wire is one curve, with no dot, when it passes behind
+   no node. When a node is in the way, its reader moves down by a part of a
+   row until the curve clears; rows do not have to be even. Only far readers
+   of a source that feeds many nodes take a lane with dots.
+17. A branch that splits from a node that feeds others stays one row under
+   that node, so its wire turns between the rows.
+18. Two wire pieces from one node may share a stretch: they read as one wire
+   that splits.
+19. The across runs into one reader stack by input: the input furthest left
    turns highest. A run that would pass behind a node or cross the wire of a
    side source goes higher, between the rows.
-18. `place`, `insert` and `place_chain` never move a node that the user placed,
+20. `place`, `insert` and `place_chain` never move a node that the user placed,
    except down, to clear an overlap or to make the room that a new node needs.
    They return every node that moved, with the old and the new position.
 
@@ -373,7 +379,11 @@ def _ranks(nodes, wires):
             # source with one reader sits in it.
             alone = not inputs[node] and len(readers[node]) == 1
             below = [rank[r] - (r in wide and not alone) for r in readers[node] if r in rank]
-            pulled[node] = bool(below) and (not inputs[node] or all(
+            # A branch that splits from a node that feeds others stays under
+            # that node: its wire then turns between the rows, not across
+            # the nodes of the rows in between.
+            split = any(port[s, node] == 0 and len(readers[s]) > 1 for s in inputs[node])
+            pulled[node] = bool(below) and not split and (not inputs[node] or all(
                 port[node, r] > 0 or pulled.get(r) for r in readers[node]))
             if pulled[node]:
                 rank[node] = max(rank[node], min(below) - 1 - extra[node])
@@ -680,6 +690,7 @@ def layout(parent=None, nodes=None, origin=None):
             for node in group:
                 node.setPosition(hou.Vector2(xs[column[node]], origin[1] - rank[node] * ROW))
             _nudge(group, wires, inputs, readers, column)
+            _drop(group, wires)
             left = max(box(node)[2] for node in group) + COLUMN_STEP
         else:
             # A VOP network reads left to right: rows become columns.
@@ -748,11 +759,16 @@ def _nudge(group, wires, inputs, readers, column):
     def line(wire):
         source, output, reader, index, _ = wire
         p, q = _out_point(source, output), _in_point(reader, index)
-        if len(readers[source]) > 1 and p[1] - q[1] > ROW * 1.5:
-            # A source that feeds several nodes reaches the far ones down a
-            # lane, through a dot above each reader (see _route).
+        direct = wire_line([p, q], curved)
+        if len(readers[source]) > 1 and abs(p[0] - q[0]) >= 0.3 and (
+                p[1] - q[1] > ROW * (SKIP + 1.5) or
+                _blocked(direct, [source, reader] + loose)):
+            # A source that feeds several nodes reaches the far ones, and the
+            # ones that the nodes in place block, down a lane, through a dot
+            # above each reader (see _route). The loose nodes move out of
+            # the way of the other wires.
             return wire_line([p, (p[0], q[1] + DOT_ABOVE), q], curved)
-        return wire_line([p, q], curved)
+        return direct
 
     def cost(node, base, lines, shapes, boxes):
         """The price of where `node` is now. `lines`, `shapes` and `boxes`
@@ -820,6 +836,43 @@ def _nudge(group, wires, inputs, readers, column):
             node.setPosition(hou.Vector2(*spot))
 
 
+def _drop(group, wires):
+    """Move a reader down by a part of a row when that lets the wire from its
+    source go straight, as one curve, past the nodes between them. Rows do
+    not have to be even: a little lower beats a dot and a detour."""
+    inside = set(group)
+    mine = [w for w in wires if w[0] in inside and w[2] in inside]
+    if not mine:
+        return
+    curved = rounded(group[0].parent())
+
+    def clear(node):
+        """The wires into and out of `node` pass behind no node, and its box
+        covers no other."""
+        for source, output, reader, index, _ in mine:
+            if node in (source, reader):
+                if _blocked(wire_line([_out_point(source, output), _in_point(reader, index)],
+                                      curved), [source, reader]):
+                    return False
+                if node == source and _out_point(source, output)[1] -                         _in_point(reader, index)[1] < 0.4:
+                    return False
+        mine_box = box(node)
+        return not any(_overlap(mine_box, box(other), 0.1) for other in group if other != node)
+
+    for source, output, reader, index, _ in mine:
+        p, q = _out_point(source, output), _in_point(reader, index)
+        alone = len([w for w in mine if w[0] == source and w[1] == output]) == 1
+        if abs(p[0] - q[0]) < 0.3 or (p[1] - q[1] > ROW * (SKIP + 1.5) and not alone) or                 not _blocked(wire_line([p, q], curved), [source, reader]):
+            continue
+        base = _pos(reader)
+        for step in range(1, 8):
+            reader.setPosition(base - hou.Vector2(0.0, 0.1 * step))
+            if clear(reader):
+                break
+        else:
+            reader.setPosition(base)
+
+
 def _crosses_line(line, rect):
     xs, ys = [p[0] for p in line], [p[1] for p in line]
     if max(xs) < rect[0] or min(xs) > rect[2] or max(ys) < rect[1] or min(ys) > rect[3]:
@@ -864,7 +917,7 @@ def _route(wires, inside):
         # nodes too: one lane, a dot for each reader. Alone, it goes straight
         # when nothing is in the way.
         alone = len([w for w in wires if w[0] == source and w[1] == output]) == 1
-        straight = (rows <= SKIP + 0.5 or abs(p[0] - q[0]) < 0.3 or alone) and \
+        straight = (rows <= SKIP + 1.5 or abs(p[0] - q[0]) < 0.3 or alone) and \
             not _blocked(wire_line([p, q], curved), [source, reader] + list(old))
         if straight:
             if dots:
@@ -1227,14 +1280,16 @@ def _on_top(one, two, shared=None, runs=None):
 
 
 def overlaps(network, found=None):
-    """Pairs of wire pieces that run on top of each other."""
+    """Pairs of wire pieces that run on top of each other. Two pieces from one
+    node read as one wire that splits, so they are not a pair."""
     found = found if found is not None else legs(network)
     runs = [_runs(leg[2]) for leg in found]
+    roots = [_source(leg[0][0])[0] for leg in found]
     pairs = []
     for i, one in enumerate(found):
         for j in range(i + 1, len(found)):
             two = found[j]
-            if _on_top(one[2], two[2], one[2][0] if one[0] == two[0] else None,
+            if roots[i] != roots[j] and _on_top(one[2], two[2], one[2][0] if one[0] == two[0] else None,
                        (runs[i], runs[j])):
                 pairs.append((one, two))
     return pairs
