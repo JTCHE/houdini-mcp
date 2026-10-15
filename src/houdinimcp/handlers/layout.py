@@ -538,6 +538,19 @@ def _columns(group, rank, inputs, readers, extra, wires):
         else:
             owner[source] = min(ends, key=lambda r: (-chain(r), -len(downstream(r)), rank[r]))
 
+    # The spine: from the main output up through input 0. Each node on it
+    # goes above its reader on it, so the main chain is one column.
+    sinks = [node for node in group if not [r for r in readers[node] if r in rows]]
+    main = _main_sink(sinks, rank)
+    node, seen = main, {main}
+    while True:
+        up = next((source for index, source in ports.get(node, []) if not index), None)
+        if up is None or up in seen or rank[up] >= rank[node]:
+            break
+        owner[up] = node
+        seen.add(up)
+        node = up
+
     strict = [True]
 
     def ports_of(source):
@@ -620,8 +633,6 @@ def _columns(group, rank, inputs, readers, extra, wires):
             reach[node] = max(rank[r] for r in mine)
     feeders = set(reach)
 
-    sinks = [node for node in group if not [r for r in readers[node] if r in rows]]
-    main = _main_sink(sinks, rank)
     take(main, 0)
     grow(main)
     for feeder in sorted(feeders, key=lambda node: (reach[node], rank[node])):
@@ -665,6 +676,63 @@ def _columns(group, rank, inputs, readers, extra, wires):
         if node not in column:
             take(node, first_free(0, rows[node]))
     return column, used
+
+
+def _order(group, column, used, rank, wires):
+    """Put the columns in the order where the fewest wires cross. A wire
+    turns across just under its source and goes down into its input, so a
+    wire that goes across crosses each wire that comes down through that
+    height. Each column moves to the place that makes the fewest crossings,
+    while a move makes fewer. Returns the new column and used."""
+    inside = set(group)
+    lines = []
+    for source, _, reader, index, _ in wires:
+        if source in inside and reader in inside and source != reader:
+            count = min(max(len(reader.inputConnectors()), 1), 8)
+            lines.append((source, column[source], rank[source], column[reader],
+                          (min(index, count - 1) - (count - 1) / 2.0) * 0.15, rank[reader]))
+    order = sorted(set(column.values()))
+    if len(lines) < 2 or len(order) < 2:
+        return column, used
+    curved = rounded(group[0].parent())
+
+    def crossings(order):
+        place = {col: n for n, col in enumerate(order)}
+        drawn = [(source, place[a], y, place[b] + offset, end)
+                 for source, a, y, b, offset, end in lines]
+        found = 0
+        for i, (s1, x1, y1, u1, v1) in enumerate(drawn):
+            low1, high1 = min(x1, u1), max(x1, u1)
+            for s2, x2, y2, u2, v2 in drawn[i + 1:]:
+                if s1 == s2:
+                    continue
+                if not curved:
+                    # A straight wire goes from the output to the input.
+                    found += _segments_cross((x1 * 2.5, -y1 * ROW), (u1 * 2.5, -v1 * ROW),
+                                             (x2 * 2.5, -y2 * ROW), (u2 * 2.5, -v2 * ROW))
+                    continue
+                # The run across of one, just under its source, against the
+                # drop of the other, from its source down to its input.
+                if low1 < u2 < high1 and y2 <= y1 < v2:
+                    found += 1
+                if min(x2, u2) < u1 < max(x2, u2) and y1 <= y2 < v1:
+                    found += 1
+        return found
+
+    best = crossings(order)
+    moved = True
+    while moved and best:
+        moved = False
+        for col in list(order):
+            rest = [c for c in order if c != col]
+            for n in range(len(order)):
+                trial = rest[:n] + [col] + rest[n:]
+                found = crossings(trial)
+                if found < best:
+                    best, order, moved = found, trial, True
+    new = {col: n + min(column.values()) for n, col in enumerate(order)}
+    return ({node: new[col] for node, col in column.items()},
+            {new[col]: cells for col, cells in used.items() if col in new})
 
 
 def _column_x(group, column, used, rank, extra, left, lanes=()):
@@ -746,6 +814,7 @@ def layout(parent=None, nodes=None, origin=None):
                         key=lambda g: min(before[n][0] for n in g)):
         column, used = _columns(group, rank, inputs, readers, extra, wires)
         if vertical:
+            column, used = _order(group, column, used, rank, wires)
             lanes = {column[node] for node in group if not inputs[node] and
                      len(readers[node]) > 1}
             xs = _column_x(group, column, used, rank, extra, left, lanes)
@@ -1020,8 +1089,7 @@ def _route(wires, inside):
         # nodes too: one lane, a dot for each reader. Alone, it goes straight
         # when nothing is in the way.
         alone = len([w for w in wires if w[0] == source and w[1] == output]) == 1
-        straight = (rows <= SKIP + 1.5 or abs(p[0] - q[0]) < 0.3 or alone) and \
-            not _blocked(wire_line([p, q], curved), [source, reader] + list(old))
+        straight = not _blocked(wire_line([p, q], curved), [source, reader] + list(old))
         if straight:
             if dots:
                 reader.setInput(index, source, output)
