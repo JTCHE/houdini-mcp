@@ -212,6 +212,11 @@ def get_attrib_values(node_path, attrib_name, attrib_class="point", frame=None,
     client to hold.
     """
     node, geo = resolve(node_path, frame)
+    return attrib_values(geo, attrib_name, attrib_class, unique, start, count)
+
+
+def attrib_values(geo, attrib_name, attrib_class="point", unique=False, start=0, count=10):
+    """get_attrib_values on a geometry that no node holds."""
     if attrib_class == "detail":
         attribute = geo.findGlobalAttrib(attrib_name)
         if not attribute:
@@ -383,12 +388,15 @@ def _match_keys(geometry, match_attrib):
     return {number: number for number in range(len(geometry.points()))}
 
 
-def try_nodes(input_path, steps, frame=None):
+def try_nodes(input_path, steps, frame=None, attrib_name=None, attrib_class="point",
+              unique=False, start=0, count=10):
     """Run node types on the geometry of a node without touching the scene.
 
     Each step is {"node_type": "unpackusd", "parameters": {...}}. The steps run
     as verbs on a copy of the geometry, so the question "what would this node
-    make here" costs no node, no undo and no change for the user.
+    make here" costs no node, no undo and no change for the user. A type with
+    no verb, such as an asset, runs as a temporary node in a hidden network.
+    `attrib_name` reads that attribute on the result.
     """
     node, source = resolve(input_path, frame)
     category = hou.sopNodeTypeCategory()
@@ -396,10 +404,10 @@ def try_nodes(input_path, steps, frame=None):
     ran = []
     for index, step in enumerate(steps):
         type_name = step["node_type"]
+        node_type = hou.nodeType(category, type_name)
+        if node_type is None:
+            raise ValueError(f"Step {index}: there is no SOP type '{type_name}'.")
         verb = category.nodeVerb(type_name)
-        if not verb:
-            raise ValueError(f"Step {index}: Houdini has no SOP verb for '{type_name}'. "
-                             f"A node type without a verb must be made in the scene.")
         parameters = dict(step.get("parameters") or {})
         # A verb has no node, so it cannot resolve a relative path. Make every
         # path absolute against the input node, or the verb reads nothing and
@@ -407,11 +415,16 @@ def try_nodes(input_path, steps, frame=None):
         for name, value in parameters.items():
             if isinstance(value, str) and value.startswith(".."):
                 parameters[name] = node.node(value).path() if node.node(value) else value
-        verb.setParms(parameters)
-        output = hou.Geometry()
-        verb.execute(output, [current])
+        if verb:
+            verb.setParms(_menu_indices(node_type, parameters, index))
+            output = hou.Geometry()
+            verb.execute(output, [current])
+        else:
+            output = _run_as_node(type_name, parameters, current, index)
         ran.append({"step": index, "node_type": type_name,
                     "points": len(output.points()), "prims": len(output.prims())})
+        if not verb:
+            ran[-1]["ran_as"] = "a temporary node: this type has no verb"
         if not len(output.points()) and not len(output.prims()):
             ran[-1]["note"] = ("This verb made no geometry. A relative path in a parameter "
                                "is the usual cause: a verb has no node to resolve it from.")
@@ -425,7 +438,57 @@ def try_nodes(input_path, steps, frame=None):
         "bounding_box": {"min": list(bbox.minvec()), "max": list(bbox.maxvec())},
         "point_groups": [group.name() for group in current.pointGroups()],
         "prim_groups": [group.name() for group in current.primGroups()],
-    }}
+    }, **({"attrib": attrib_values(current, attrib_name, attrib_class, unique, start, count)}
+          if attrib_name else {})}
+
+
+def _menu_indices(node_type, parameters, step):
+    """The parameters with each menu token as its index: a verb takes only
+    the index, where parm_set and a node take the token."""
+    group = node_type.parmTemplateGroup()
+    found = dict(parameters)
+    for name, value in parameters.items():
+        template = group.find(name)
+        if not isinstance(value, str) or template is None or                 template.type() == hou.parmTemplateType.String or                 not hasattr(template, "menuItems") or not template.menuItems():
+            continue
+        tokens, labels = list(template.menuItems()), list(template.menuLabels())
+        if value in tokens:
+            found[name] = tokens.index(value)
+        elif value in labels:
+            found[name] = labels.index(value)
+        elif value.isdigit():
+            found[name] = int(value)
+        else:
+            raise ValueError(f"Step {step}: '{value}' is not in the menu of {name}. "
+                             f"Tokens: {', '.join(tokens)}.")
+    return found
+
+
+def _run_as_node(type_name, parameters, geometry, step):
+    """One step as a real node in a hidden network that is deleted after, for
+    a type with no verb. Undo does not record it."""
+    with hou.undos.disabler():
+        box = hou.node("/obj").createNode("geo", "__mcp_try")
+        try:
+            box.hide(True)
+            stash = box.createNode("stash")
+            stash.parm("stash").set(geometry)
+            node = box.createNode(type_name)
+            node.setInput(0, stash)
+            node.setParms(parameters)
+            try:
+                node.cook(force=True)
+            except hou.OperationFailed as error:
+                raise ValueError(f"Step {step}: {type_name} did not cook: "
+                                 f"{'; '.join(node.errors()) or error}") from error
+            if node.errors():
+                raise ValueError(f"Step {step}: {type_name} did not cook: "
+                                 f"{'; '.join(node.errors())}")
+            output = hou.Geometry()
+            output.merge(node.geometry())
+            return output
+        finally:
+            box.destroy()
 
 
 def _no_attrib(geometry, name, attrib_class):

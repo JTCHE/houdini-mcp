@@ -90,7 +90,9 @@ def _one(path, mode, options, frame=None):
         if not want("steps"):
             raise ValueError('mode \'try\' needs steps, for example '
                              '[{"node_type": "unpackusd", "parameters": {}}].')
-        return geometry.try_nodes(path, want("steps"), frame)
+        return geometry.try_nodes(path, want("steps"), frame, want("attrib_name"),
+                                  want("attrib_class", "point"), want("unique", False),
+                                  want("start", 0), want("limit", 10))
     if mode == "volume_stats":
         return volumes.stats(path, want("name"), frame, want("bins", 0), want("threshold"))
     if mode == "volume_voxels":

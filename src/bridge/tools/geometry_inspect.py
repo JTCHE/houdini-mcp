@@ -18,8 +18,8 @@ PARAMS = {
     "start": "points, prims, attrib: the first element. Page with it.",
     "count": "points, prims: how many elements. Keep it small: a large read is slow.",
     "attribs": 'points: the attributes to return, for example ["P", "Cd"].',
-    "attrib_name": "attrib: the attribute to read.",
-    "attrib_class": 'attrib: "point", "prim", "vertex" or "detail".',
+    "attrib_name": "attrib, try: the attribute to read. try reads it on the result.",
+    "attrib_class": 'attrib, try: "point", "prim", "vertex" or "detail".',
     "group_name": "group_members: the group to read.",
     "group_type": 'groups, group_members: "point", "prim", "vertex" or "edge".',
     "prim_index": "intrinsics: the primitive to read.",
@@ -43,8 +43,8 @@ PARAMS = {
     "positions": "volume_sample: the [x, y, z] points to read at.",
     "from_node": "volume_sample: read at the points of this node. volume_compare: the node "
                  "that holds `against`, such as a collider SDF.",
-    "steps": 'try: a list of {"node_type": ..., "parameters": {...}} to run on the geometry '
-             "as verbs. Nothing changes in the scene.",
+    "steps": 'try: a list of {"node_type": ..., "parameters": {...}} to run on the geometry. '
+             "A menu takes its token or its index. Nothing changes in the scene.",
     "bins": "volume_stats, volume_sample, volume_compare: a count of equal bands, or a list "
             "of band edges, for example [-1, 0, 0.05, 0.15, 0.25].",
     "limit": "attrib: how many values (10). volume_voxels: how many numbers before the array "
@@ -107,7 +107,12 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
         "try"            — run `steps`, a list of
                            {"node_type": ..., "parameters": {...}}, on the
                            geometry of `path` as verbs. Nothing changes in the
-                           scene. Use it to learn what a node would make.
+                           scene. Use it to learn what a node would make. A
+                           menu takes its token ("poly") or its index. A type
+                           with no verb, such as an asset, runs as a temporary
+                           node in a hidden network that is then deleted.
+                           `attrib_name` reads that attribute on the result,
+                           as mode "attrib" does, `unique` included.
         "volume_stats"   — every volume or VDB: resolution, voxel size, the
                            extremes, the mean, the sum, percentiles. `name`
                            reads one, `bins` adds a histogram, `threshold`
