@@ -29,6 +29,8 @@ PARAMS = {
     "background": "python: return at once with a job id and let the script run. Read it "
                   "with mode job. Until it ends, other calls are refused.",
     "job": "job: the job id that background returned.",
+    "wait": "job: the most seconds to wait for the job to end. The answer comes when it "
+            "ends or when the wait is over, with what it printed so far.",
 }
 
 # Background jobs of this bridge, by id. A job holds the connection while it
@@ -39,7 +41,7 @@ JOBS = {}
 def tool(source: str = None, mode: str = "python", language: str = "hscript",
          name: str = None, file: str = None, globals: Dict[str, Any] = None,
          args: List[str] = None, timeout: float = 30.0, background: bool = False,
-         job: str = None) -> str:
+         job: str = None, wait: float = 0.0) -> str:
     """Run code in Houdini, with the full `hou` module and no guard.
 
     Use it for what no other tool covers, and to confirm an API in the live
@@ -71,13 +73,14 @@ def tool(source: str = None, mode: str = "python", language: str = "hscript",
         "env"        — read the Houdini variable `name`, for example "HIP".
         "job"        — the state of the background job `job`: running, with
                        what it printed so far, or done, with its result.
+                       `wait` waits for the end, up to that many seconds.
 
     Use `file` for a script that you run again with other values. Houdini
     answers nothing while a script runs: for long work, such as a sweep, use
     `background` with a large `timeout`. session action='interrupt' stops it.
     """
     if mode == "job":
-        return _job_report(job)
+        return _job_report(job, wait)
     params = {"source": source, "mode": mode, "language": language, "name": name,
               "file": file, "globals": globals, "args": args,
               "timeout": timeout if mode == "python" else None}
@@ -121,11 +124,14 @@ def _start_job(params, budget):
                                f"action='interrupt' stops it."}, separators=(",", ":"))
 
 
-def _job_report(job):
+def _job_report(job, wait=0.0):
     record = JOBS.get(job)
     if record is None:
         raise HoudiniError(f"No job '{job}' in this bridge. Jobs: "
                            f"{', '.join(JOBS) or 'none'}.")
+    deadline = time.monotonic() + max(wait, 0.0)
+    while record["state"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.2)
     report = {key: record[key] for key in ("job", "state", "timeout") if key in record}
     if record["state"] == "running":
         report["seconds"] = round(time.monotonic() - record["started"], 1)
