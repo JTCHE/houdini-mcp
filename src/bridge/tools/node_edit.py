@@ -10,7 +10,7 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
 
 PARAMS = {
     "mode": 'One of "create", "delete", "copy", "move", "rename", "flags", "color", '
-            '"layout", "wrangle", "material", "assign_material", "take", '
+            '"layout", "insert", "place_chain", "wrangle", "material", "assign_material", "take", '
             '"current_network", "note", "box".',
     "items": "A list of items for a repeated action, each a dictionary with the keys of "
              "one call. An argument outside items is the default for each one.",
@@ -34,12 +34,17 @@ PARAMS = {
     "material_path": "assign_material: the material node.",
     "take_name": "take: the take to make current.",
     "input_path": "create: the node that feeds the new node. It saves a connect call and "
-                  "places the node under its input.",
+                  "places the node under its input. insert: the node whose output wires "
+                  "get the new node.",
+    "reader": "insert: only the wires into this node. place_chain: the node that the chain "
+              "feeds.",
+    "input_index": "place_chain: the input of reader that the chain feeds.",
     "code_file": "wrangle: read the VEX from this file, so a long snippet travels once.",
     "replace": 'wrangle: edit the snippet in place, a list of {"old": ..., "new": ...}. '
                "Each old must appear exactly once.",
     "paths": "copy: the nodes to copy. delete: the nodes to delete together. layout: place "
-             "only these nodes. box: the nodes to put in the box.",
+             "only these nodes. place_chain: the chain, in order. box: the nodes to put in "
+             "the box.",
     "force": "delete: delete a node that still feeds a node that stays.",
     "suffix": "copy: text added to the name of each copy.",
     "names": "copy: a new name for each source, by source path or name.",
@@ -58,11 +63,17 @@ def tool(mode: str = "create",
          take_name: str = None, input_path: str = None,
          code_file: str = None, replace: List[Dict[str, str]] = None,
          paths: List[str] = None, suffix: str = None,
-         names: Dict[str, str] = None, text: str = None, force: bool = None) -> str:
+         names: Dict[str, str] = None, text: str = None, force: bool = None,
+         reader: str = None, input_index: int = None) -> str:
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
     for the wires.
+
+    Do not compute positions: create with input_path, insert and place_chain
+    place the nodes the way the user lays out a graph, move a node of the user
+    only down to make room, and return every node that moved with its old and
+    new position. Each returns the layout faults it sees.
 
     Do not use it to set parameters: parm_set does that, and it reports a write
     that had no effect.
@@ -92,12 +103,25 @@ def tool(mode: str = "create",
         "flags"            — path, display, render, bypass. The display flag
                              and the render flag are different flags.
         "color"            — path, color as [r, g, b] from 0 to 1.
-        "layout"           — path: lay out the children of that network in
-                             rows, each node under its inputs. Give `paths` to
-                             place only those nodes next to what they connect
-                             to. Without it the whole network moves, including
-                             the nodes the user placed by hand, and the result
-                             says so.
+        "layout"           — path: lay out the children of that network:
+                             each node under its first input (a straight
+                             wire), side inputs from the right in port order,
+                             a source one row above its reader, long wires down
+                             a lane through dots. Give `paths` to lay out only
+                             those nodes. Without it the whole network moves,
+                             including the nodes the user placed by hand, and
+                             the result says so.
+        "insert"           — node_type (or path of a node), input_path, and
+                             reader: put the node on every wire from
+                             input_path into reader (all streams of a Vellum
+                             chain), or into every reader. The nodes below
+                             move down only by the room it needs.
+        "place_chain"      — paths (in order), reader, input_index: wire the
+                             chain into that input and place it as a side
+                             chain, its own column right of the reader, last
+                             node one row above it. Wire a side result into
+                             the node that really reads it, not through
+                             pass-through ports of a chain.
         "wrangle"          — parent_path with code to make a wrangle, or path
                              with code to write into one. code_file reads the
                              code from a file, so a long snippet travels once.
@@ -129,5 +153,6 @@ def tool(mode: str = "create",
         ("take_name", take_name), ("input_path", input_path),
         ("code_file", code_file), ("replace", replace), ("paths", paths),
         ("suffix", suffix), ("names", names), ("text", text), ("force", force),
+        ("reader", reader), ("input_index", input_index),
     ) if value is not None})
     return call_json("node_edit", arguments)

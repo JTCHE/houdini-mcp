@@ -9,7 +9,8 @@ from ..handlers import chops, cops, lop, materials, nodes, takes, vex, viewport
 MUTATES = True
 
 MODES = ("create", "delete", "copy", "move", "rename", "flags", "color", "layout",
-         "wrangle", "material", "assign_material", "take", "current_network", "note", "box")
+         "insert", "place_chain", "wrangle", "material", "assign_material", "take",
+         "current_network", "note", "box")
 
 
 def run(items=None, mode="create", **defaults):
@@ -58,6 +59,11 @@ def _one(mode, item):
         return nodes.set_node_color(item["path"], item["color"])
     if mode == "layout":
         return nodes.layout_children(item.get("path", "/obj"), item.get("paths"))
+    if mode == "insert":
+        return nodes.insert_node(item["input_path"], item.get("node_type"), item.get("path"),
+                                 item.get("reader"), item.get("name"), item.get("parameters"))
+    if mode == "place_chain":
+        return nodes.place_chain(item["paths"], item["reader"], item.get("input_index", 0))
     if mode == "wrangle":
         if item.get("path"):
             return vex.write_snippet(item["path"], code=item.get("code"),

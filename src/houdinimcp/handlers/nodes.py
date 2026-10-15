@@ -364,24 +364,38 @@ def layout_children(node_path="/obj", paths=None):
     if not node:
         raise ValueError(f"Node not found: {node_path}")
     if paths:
-        items = []
-        for path in paths:
-            child = hou.node(path)
-            if not child:
-                raise ValueError(f"Node not found: {path}")
-            items.append(child)
-        layout.layout(nodes=items)
-        report = {"path": node.path(), "laid_out": [item.path() for item in items]}
+        items = [_item(path) for path in paths]
+        node = items[0].parent()
+        result = layout.layout(nodes=items)
+        report = {"path": node.path(), "laid_out": len(items)}
         faults = layout.problems(node, items)
     else:
-        layout.layout(node)
+        result = layout.layout(node)
         report = {"path": node.path(), "laid_out": "every node in this network",
                   "warning": "Every node moved, and that includes the nodes that the user "
                              "placed by hand. Give `paths` to move only your own nodes."}
         faults = layout.problems(node)
+    report.update(_moves(result["moved"]))
+    report["dots"] = result.get("dots")
     if faults:
         report["layout_problems"] = faults
     return report
+
+
+def _item(path):
+    item = hou.node(path) or hou.item(path)
+    if item is None:
+        raise ValueError(f"Node not found: {path}")
+    return item
+
+
+def _moves(moved, limit=40):
+    """{path: [old, new]} as a short report: every move, up to `limit`."""
+    rounded = {path: [[round(v, 2) for v in old], [round(v, 2) for v in new]]
+               for path, (old, new) in moved.items()}
+    if len(rounded) <= limit:
+        return {"moved": rounded} if rounded else {}
+    return {"moved_count": len(rounded), "moved": dict(list(rounded.items())[:limit])}
 
 
 MADE = "houdinimcp_made"
@@ -392,14 +406,76 @@ def place_node(node):
 
     Houdini's own layout moves every node in the network. A new node that
     places itself removes the reason to call that. Only the readers of the
-    node move, and only down, to make room. The node is marked as made by an
-    agent, so a later wire can place it again without a move of a node that
-    the user placed. Returns the layout faults that involve the node.
+    node move, and only down, to make room; a node they then cover moves down
+    too. The node is marked as made by an agent, so a later wire can place it
+    again without a move of a node that the user placed. Returns the moves of
+    the other nodes and the layout faults that involve the node.
     """
     node.setUserData(MADE, "1")
-    layout.place([node])
+    moved = layout.place([node])
+    moved.pop(node.path(), None)
+    report = _moves(moved)
     faults = layout.problems(node.parent(), [node])
-    return {"layout_problems": faults} if faults else {}
+    if faults:
+        report["layout_problems"] = faults
+    return report
+
+
+def insert_node(source_path, node_type=None, path=None, reader_path=None, name=None,
+                parameters=None, output=0):
+    """Put a node on the wires out of `source_path`: a new one of `node_type`,
+    or the node at `path`. With `reader_path`, only the wires into that node
+    (every input that reads the source, for example the three streams of a
+    Vellum chain); else every reader of that output."""
+    source = hou.node(source_path)
+    if not source:
+        raise ValueError(f"Node not found: {source_path}")
+    reader = hou.node(reader_path) if reader_path else None
+    if reader_path and reader is None:
+        raise ValueError(f"Node not found: {reader_path}")
+    if path:
+        node = hou.node(path)
+        if node is None:
+            raise ValueError(f"Node not found: {path}")
+    else:
+        if not node_type:
+            raise ValueError("insert needs node_type for a new node, or path for one that "
+                             "exists.")
+        made = create_node(node_type, source.parent().path(), name, position=[0, 0])
+        node = hou.node(made["path"])
+    node.setUserData(MADE, "1")
+    result = layout.insert(node, source, reader, output)
+    result["moved"].pop(node.path(), None)
+    report = {"path": node.path(), "source": source.path(), "rewired": result["rewired"]}
+    report.update(_moves(result["moved"]))
+    if parameters:
+        from . import parameters as parameters_handler
+        written = parameters_handler.set_parameters(node.path(), parameters)
+        report["parameters"] = written
+    faults = layout.problems(node.parent(), [node, source] + [hou.node(r["reader"])
+                                                              for r in result["rewired"]])
+    if faults:
+        report["layout_problems"] = faults
+    return report
+
+
+def place_chain(paths, reader_path, input_index=0):
+    """Wire the nodes at `paths` in order into input `input_index` of
+    `reader_path`, and place them as a side chain."""
+    chain = [_item(path) for path in paths]
+    reader = hou.node(reader_path)
+    if reader is None:
+        raise ValueError(f"Node not found: {reader_path}")
+    for node in chain:
+        node.setUserData(MADE, "1")
+    result = layout.place_chain(chain, reader, input_index)
+    report = {"chain": [node.path() for node in chain], "reader": reader.path(),
+              "input": input_index, "dots": result["dots"]}
+    report.update(_moves(result["moved"]))
+    faults = layout.problems(reader.parent(), chain + [reader])
+    if faults:
+        report["layout_problems"] = faults
+    return report
 
 
 def create_note(parent_path, text, name=None, position=None, color=None):
@@ -736,9 +812,11 @@ def connect_nodes_batch(connections):
                                            for end in ("src", "dst"))
             if isinstance(node, hou.Node) and node.userData(MADE)}
     if made:
-        layout.place(list(made.values()))
+        moved = layout.place(list(made.values()))
         network = next(iter(made.values())).parent()
         report["placed_again"] = list(made)
+        others = {path: move for path, move in moved.items() if path not in made}
+        report.update({"moved_" + key: value for key, value in _moves(others).items()})
         faults = layout.problems(network, list(made.values()))
         if faults:
             report["layout_problems"] = faults
