@@ -343,6 +343,36 @@ def _sections(lines, marks, wanted):
             f"No section matched exactly; this is '{near[0]}'.")
 
 
+def _entries(lines, wanted):
+    """A parameter or a menu entry inside a parameter table: the row whose
+    first cell is `wanted`, or the part of a cell under a bold line that is
+    `wanted`, such as the entry "Volume" of the Measure menu."""
+    wanted = wanted.strip().lower()
+    found = []
+    for line in lines:
+        if not line.startswith("|"):
+            continue
+        cells = line.strip().strip("|").split("|")
+        if len(cells) < 2:
+            continue
+        label = re.sub(r"<[^>]+>|[*`]", "", cells[0]).strip()
+        if label.lower() == wanted:
+            found.append(line)
+            continue
+        for chunk in re.split(r"<br>\s*<br>(?=\s*(?:<strong>|\*\*))", "|".join(cells[1:])):
+            bold = re.match(r"\s*(?:<strong>(.*?)</strong>|\*\*(.*?)\*\*)", chunk)
+            if bold and (bold.group(1) or bold.group(2)).strip().lower() == wanted:
+                found.append(f"{label}: {chunk.strip()}\n")
+    return found
+
+
+def _mentions(lines, wanted, most=8, size=600):
+    """The paragraphs that hold the word, when no heading and no entry is it."""
+    pieces = [piece.strip() for line in lines for piece in re.split(r"<br>\s*<br>", line)]
+    hits = [piece for piece in pieces if wanted.strip().lower() in piece.lower()]
+    return [hit if len(hit) <= size else hit[:size] + " ..." for hit in hits[:most]], len(hits)
+
+
 def excerpt(text: str, section: str = None, part: int = 1, always: str = None) -> str:
     """One answer's worth of a page: the sections whose heading holds
     `section`, cut into parts of at most LIMIT characters at line ends.
@@ -358,8 +388,19 @@ def excerpt(text: str, section: str = None, part: int = 1, always: str = None) -
     near_note = None
     if section:
         found, near_note = _sections(lines, marks, section)
+        if not found or near_note:
+            # A word that is no heading is often a parameter or a menu entry
+            # inside a table, and the section around it is long.
+            entries = _entries(lines, section)
+            if entries:
+                found, near_note = entries, f"'{section}' is an entry in a parameter table."
         if not found:
-            return f"Error: no section '{section}'. Sections: {'; '.join(headings)}"
+            hits, total = _mentions(lines, section)
+            if not hits:
+                return f"Error: no section '{section}'. Sections: {'; '.join(headings)}"
+            return (f"No section or table entry '{section}'. The paragraphs that hold it "
+                    f"({len(hits)} of {total}):\n\n" + "\n\n".join(hits) +
+                    f"\n\nSections: {'; '.join(headings)}")
         if always:
             extra, _ = _sections(lines, marks, always)
             found += [part for part in extra if part not in found]
@@ -409,6 +450,14 @@ if __name__ == "__main__":
     assert "This is the last part" in excerpt(page, part=2)
     assert excerpt(page, section="beta") == "## Beta\n\nb\n"
     assert excerpt(page, section="gamma").startswith("Error: no section 'gamma'. Sections: Alpha; Beta")
+    table = ("## Parameters\n\n| Measure | Picks it.<br><br><strong>Area</strong><br>The area."
+             "<br><br><strong>Volume</strong><br>The volume.<br><br>Closed only. |\n"
+             "| Accumulate | How to add up. |\n")
+    assert excerpt(table, section="volume") == ("'volume' is an entry in a parameter table.\n\n"
+                                                "Measure: <strong>Volume</strong><br>The "
+                                                "volume.<br><br>Closed only.\n")
+    assert "Accumulate | How" in excerpt(table, section="accumulate")
+    assert excerpt(table, section="closed").startswith("No section or table entry 'closed'")
     assert excerpt(page, part=3) == "Error: part must be 1 to 2."
     # A class page can write its headings as HTML, and an empty
     # section is two headings in a row.
