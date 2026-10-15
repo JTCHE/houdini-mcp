@@ -47,7 +47,10 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
                         `type_name` such as "Mesh" or "SphereLight".
         "layer"       — the layer stack, and the layer at `layer_index`.
         "attribute"   — the value of `attr_name` on `prim_path`.
-        "composition" — where the opinions on `prim_path` come from.
+        "composition" — where the opinions on `prim_path` come from: each
+                        layer of its prim stack, strongest first, with the
+                        node that wrote it (the SOP behind an op: layer) and
+                        its references and payloads.
         "variants"    — the variant sets on `prim_path` and the selection.
         "stats"       — counts under `prim_path`.
         "modified"    — the last `count` prims that this node changed. Use it

@@ -227,13 +227,39 @@ def get_usd_composition(path, prim_path):
     prim = stage.GetPrimAtPath(prim_path)
     if not prim:
         raise ValueError(f"Prim not found: {prim_path}")
-    arcs = {
-        "references": bool(prim.GetReferences()),
-        "payloads": bool(prim.GetPayloads()),
-        "inherits": bool(prim.GetInherits()),
-        "specializes": bool(prim.GetSpecializes()),
-    }
-    return {"prim": prim_path, "composition": arcs}
+    stack = []
+    for spec in prim.GetPrimStack():
+        entry = {"layer": spec.layer.identifier.split(":SDF_FORMAT_ARGS:")[0],
+                 "spec": str(spec.path)}
+        source = _layer_source(spec.layer)
+        if source:
+            entry["from_node"] = source
+        for arc, items in (("references", spec.referenceList), ("payloads", spec.payloadList)):
+            found = [item.assetPath or str(item.primPath) for item in items.GetAddedOrExplicitItems()]
+            if found:
+                entry[arc] = found
+        stack.append(entry)
+    return {"prim": prim_path, "prim_stack": stack,
+            "note": "The first layer is the strongest. from_node is the node that wrote the "
+                    "layer: an op: layer is the SOP that a SOP Import or Scene Import reads."}
+
+
+def _layer_source(layer):
+    """The Houdini node that made a layer: the SOP of an op: layer, or the LOP
+    that a layer names as its creator."""
+    identifier = layer.identifier
+    if identifier.startswith("op:"):
+        # op:/obj/geo1/OUT.sop, sometimes with arguments after it.
+        path = identifier[3:].split(".sop")[0]
+        node = hou.node(path)
+        return node.path() if node else path
+    info = layer.GetPrimAtPath("/HoudiniLayerInfo")
+    creator = info.customData.get("HoudiniCreatorNode") if info else None
+    if isinstance(creator, int):
+        node = hou.nodeBySessionId(creator)
+        if node:
+            return node.path()
+    return None
 
 
 def get_usd_variants(path, prim_path):
