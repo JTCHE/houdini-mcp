@@ -7,7 +7,7 @@ from ..handlers import lop, timing
 MUTATES = False
 
 MODES = ("stage", "prims", "prim", "search", "layer", "attribute", "composition",
-         "variants", "stats", "modified", "lights", "transform")
+         "variants", "stats", "modified", "lights", "transform", "profile")
 
 
 def run(path, mode="stage", prim_path=None, pattern=None, type_name=None,
@@ -62,6 +62,8 @@ def _one(path, mode, prim_path, pattern, type_name, attr_name, root_prim, max_de
         return lop.get_last_modified_prims(path, count)
     if mode == "lights":
         return lop.list_lights(path)
+    if mode == "profile":
+        return lop.profile_chain(path)
     if mode == "transform":
         _needs(prim_path, "transform")
         return lop.world_transform(path, prim_path)

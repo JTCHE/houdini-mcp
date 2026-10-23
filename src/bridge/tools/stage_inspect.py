@@ -10,7 +10,8 @@ ANNOTATIONS = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldH
 PARAMS = {
     "path": "The LOP node whose stage to read.",
     "mode": 'One of "stage", "prims", "prim", "search", "layer", "attribute", '
-            '"composition", "variants", "stats", "modified", "lights", "transform".',
+            '"composition", "variants", "stats", "modified", "lights", "transform", '
+            '"profile".',
     "prim_path": 'prim, attribute, composition, variants, stats, transform: the prim, for '
                  'example "/world/geo/rock".',
     "pattern": "search: the prim path to match, with * as a wildcard.",
@@ -59,6 +60,11 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
         "transform"   — where `prim_path` is in the world: translate, rotate
                         and scale composed through every parent. With
                         `frames`, the path of a moving prim.
+        "profile"     — each LOP node of the chain up to `path`: cook time,
+                        prims by type, and the prims it adds, slowest
+                        first. It names the node that makes an export or a
+                        render start slow, and flags a SOP Import that
+                        writes each packed piece as its own Xform.
 
     A layer file that another process wrote again (a cache from hython) is
     reloaded before the read, and `reloaded_layers` names it.

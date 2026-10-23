@@ -359,3 +359,40 @@ def lop_import(path, file, method="reference", prim_path=None):
     else:
         raise ValueError(f"Unknown import method: {method}")
     return {"imported": True, "path": node.path(), "file": file, "method": method}
+
+
+def profile_chain(path):
+    """Each LOP node of the chain that ends at `path`, inputs first: its cook
+    time, its prim count by type, and the prims it adds. It finds the node
+    that makes a stage slow, such as a SOP Import that writes each packed
+    piece as its own Xform prim."""
+    import time
+    node = hou.node(path)
+    if not isinstance(node, hou.LopNode):
+        raise ValueError(f"{path} is not a LOP node.")
+    chain = [one for one in node.inputAncestors() if isinstance(one, hou.LopNode)]
+    order = sorted(chain, key=lambda one: len(one.inputAncestors())) + [node]
+    rows = []
+    for one in order:
+        started = time.perf_counter()
+        one.cook(force=True)
+        seconds = time.perf_counter() - started
+        stage = one.stage()
+        types = {}
+        for prim in stage.Traverse() if stage else ():
+            name = prim.GetTypeName() or "(no type)"
+            types[name] = types.get(name, 0) + 1
+        before = max((row["prims"] for row in rows if row["path"] in
+                      {str(source.path()) for source in one.inputs() if source}), default=0)
+        row = {"path": one.path(), "type": one.type().name(), "cook_seconds": round(seconds, 3),
+               "prims": sum(types.values()), "added": sum(types.values()) - before,
+               "by_type": dict(sorted(types.items(), key=lambda item: -item[1])[:6])}
+        if types.get("Xform", 0) > 10000 and one.type().name().startswith("sopimport"):
+            row["warning"] = (f"{types['Xform']} Xform prims: each packed piece became its "
+                              f"own prim. Set packedhandling to a PointInstancer and turn on "
+                              f"its toggle enable_packedhandling.")
+        rows.append(row)
+    rows.sort(key=lambda row: -row["cook_seconds"])
+    return {"path": path, "nodes": rows,
+            "note": "Sorted by cook time, slowest first. `added` is the prims a node adds "
+                    "to the stage of its first input."}
