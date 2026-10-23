@@ -9,6 +9,10 @@ from ..connection import call_json
 ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                               idempotentHint=False, openWorldHint=False)
 
+# A cache of a long simulation runs for hours. The wait ends with the cook,
+# or with session action='interrupt'.
+COOK_SECONDS = 24 * 3600.0
+
 PARAMS = {
     "paths": "The node to cook, or a list of nodes.",
     "mode": 'One of "cook", "cache_write", "cache_clear", "sim_step", "sim_reset", "recook". '
@@ -72,13 +76,13 @@ def tool(paths: Union[str, List[str]], mode: str = "cook",
     checks that a result moves or grows over a range. `ok` is false when a
     node failed to cook, and `failed` then names each node upstream of it or
     inside it that holds an error, with the text: the node that broke is
-    often another node than the one you cooked. A cook can take minutes:
-    the call waits, and a timeout does not stop the cook. Cook a long range in
-    parts of a few seconds, so that one call does not block Houdini past the
-    timeout.
+    often another node than the one you cooked. A cook, a cache or a
+    simulation can take hours, and the call waits for it: a client that reads
+    MCP tasks gets a task at once and polls it. Houdini answers no other call
+    until the cook ends; session action='interrupt' stops it.
     """
     return call_json("cook", {"paths": paths, "mode": mode,
                               "frame_range": frame_range, "frames": frames,
                               "num_steps": num_steps, "parameters": parameters,
                               "force": force},
-                     timeout=600.0)
+                     timeout=COOK_SECONDS)

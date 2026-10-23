@@ -27,7 +27,17 @@ def identity() -> dict:
         "product": hou.applicationName(),
         "ui": hou.isUIAvailable(),
         "hip": hou.hipFile.path(),
+        **({"update_mode": "manual"} if _manual() else {}),
     }
+
+
+_set_mode = hou.setUpdateMode
+
+
+def _manual():
+    """[True] in a GUI in manual update mode: a list, so a call that sets the
+    mode can empty it. False otherwise."""
+    return hou.isUIAvailable() and hou.updateModeSetting() == hou.updateMode.Manual and [True]
 
 
 class HoudiniMCPServer:
@@ -200,6 +210,15 @@ class HoudiniMCPServer:
         """
         watcher = watchdog.watch(name, self.port)
         self.busy = True
+        # In manual update mode a node does not cook, also not on cook(force=True),
+        # and every read gives empty geometry with no error. The call cooks
+        # what it reads; the viewer cooks nothing, because the event loop does
+        # not run before the mode goes back.
+        manual = _manual()
+        if manual:
+            _set_mode(hou.updateMode.AutoUpdate)
+            # A call that sets the mode itself keeps its choice.
+            hou.setUpdateMode = lambda mode: (manual.clear(), _set_mode(mode))[1]
         try:
             with watcher:
                 result = work()
@@ -218,6 +237,10 @@ class HoudiniMCPServer:
             traceback.print_exc()
             answer = {"status": "error", "message": f"{type(error).__name__}: {error}"}
         finally:
+            if manual is not False:
+                hou.setUpdateMode = _set_mode
+            if manual:
+                _set_mode(hou.updateMode.Manual)
             self.busy = False
         self.waiting = None
         answer["session"] = {**identity(), "port": self.port}

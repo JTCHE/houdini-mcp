@@ -1,5 +1,6 @@
 """VEX wrangle creation and validation handlers."""
 import os
+import re
 
 import hou
 
@@ -25,6 +26,23 @@ def create_wrangle(parent_path, wrangle_type="attribwrangle", name=None, code=""
     if code or code_file:
         report.update(write_snippet(node.path(), code, code_file))
     return report
+
+
+def size_note(code):
+    """The house rule for VEX that a person reads: built-in nodes first, and a
+    wrangle only when it is about ten lines or less. None when the code keeps
+    to it."""
+    lines = [line for line in code.splitlines()
+             if line.strip() and not line.strip().startswith("//")]
+    builds = ("addpoint" in code or "addprim" in code) and re.search(
+        r"\b(for|foreach|while)\b", code)
+    if len(lines) <= 10 and not builds:
+        return None
+    return (f"This snippet has {len(lines)} lines"
+            f"{' and makes geometry in a loop' if builds else ''}. Look for the chain of "
+            f"built-in nodes first (Sweep, Carve, Scatter, Copy to Points, Attribute Noise, "
+            f"Attribute Randomize, Attribute Remap, Blast...): the user reads a network more "
+            f"easily than code. Keep VEX for what is simpler in about ten lines.")
 
 
 def _snippet_parm(node, parm="snippet"):
@@ -85,6 +103,9 @@ def write_snippet(node_path, code=None, code_file=None, replace=None, parm="snip
     expanded = parameters._expansion_warning(target, target.parmTemplate())
     if expanded:
         report["warning"] = expanded
+    rule = size_note(code)
+    if rule:
+        report["house_rule"] = rule
     try:
         node.cook(force=True)
     except hou.OperationFailed:

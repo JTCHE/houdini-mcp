@@ -26,6 +26,9 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
                          f"{hint}") from error
 
     report = {"path": node.path(), "type": node.type().name()}
+    rule = house_rule(node)
+    if rule:
+        report["house_rule"] = rule
     if name and node.name() != name:
         report["renamed_by_houdini"] = (f"The name '{name}' was in use. Use the path in this "
                                         f"result from now on.")
@@ -53,6 +56,23 @@ def create_node(node_type, parent_path="/obj", name=None, position=None, paramet
         if written["not_applied"]:
             report["not_applied"] = written["not_applied"]
     return report
+
+
+def house_rule(node):
+    """The convention of the user that a new node breaks, or None."""
+    kind = node.type().name()
+    if kind in ("attribexpression", "groupexpression"):
+        return ("An Expression SOP hides its logic behind a preset menu and fields. Use an "
+                "Attribute Wrangle with the same one line instead, for example "
+                "`@P = lerp(v@center, @P, 1.4);` or `i@group_name = condition;`.")
+    if kind == "output":
+        others = [other.path() for other in node.parent().children()
+                  if other != node and other.type().name() == "output"]
+        if others:
+            return (f"This network already has an Output SOP ({', '.join(others)}). Keep one "
+                    f"Output, the last node, named OUT_<NAME>: merge the results into it. "
+                    f"A result that another network reads is a Null named OUT_<NAME>.")
+    return None
 
 
 def close_types(parent, node_type, count=5):
@@ -502,6 +522,10 @@ def create_note(parent_path, text, name=None, position=None, color=None):
 
 def create_box(parent_path, paths, text=None, name=None, color=None):
     """A network box around `paths`, with `text` as its comment."""
+    if text and (len(text) > 24 or len(text.split()) > 3):
+        raise ValueError(f"A network box comment is a title of one to three words, such as "
+                         f"'SIM MESH'. {text!r} is longer. Give the box a short title, and "
+                         f"put the explanation in a sticky note with mode 'note'.")
     parent = _network(parent_path)
     box = parent.createNetworkBox(name)
     for path in paths:

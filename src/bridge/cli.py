@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import MCPServer
 
 from . import connection, tools
+from .tasks import Tasks
 
 INSTRUCTIONS = """\nThese tools are few on purpose. Each one takes a `mode` and a set of arguments,
 and bends to the task instead of being replaced by a script. Read the
@@ -81,6 +82,18 @@ Rules of the house
     (`exportlist`) is read-only, and the snippet fails at the first cook with
     "Read-only expression on left side of assignment". When your snippet writes
     a temporary field, put its name in `exportlist`, or set `exportlist` to `*`.
+- Build with the nodes that Houdini has. A network of more nodes is right; a
+  network that hides its logic in code is not. Write VEX only when it is
+  simpler, in about ten lines or less. For a one-line change use an Attribute
+  Wrangle, not an Attribute Expression or a Group Expression SOP.
+- Keep the default node names (box1, attribwrangle3). In batch, give a step
+  an `id` and write "$id" for its path. Only the Output SOP gets a name.
+- Each SOP network ends in exactly one Output SOP, named OUT_<NAME>: merge the
+  results into it. A result that another network reads is a Null named
+  OUT_<NAME>.
+- Never write a node comment. A note goes in a sticky note next to the nodes
+  (node_edit mode "note"). A network box comment is a title of one to three
+  words, such as "SIM MESH". Never put a box inside a box.
 - Do not save the user's .hip file unless you are asked to.
 """
 
@@ -93,7 +106,7 @@ async def lifespan(server):
 
 def build() -> MCPServer:
     return MCPServer("HoudiniMCP", instructions=INSTRUCTIONS, lifespan=lifespan,
-                     tools=tools.build())
+                     tools=tools.build(), extensions=[Tasks()])
 
 
 def main():

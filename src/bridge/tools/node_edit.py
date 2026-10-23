@@ -70,7 +70,10 @@ def tool(mode: str = "create",
     """Change the nodes in a network. One item, or a list in one undo group.
 
     Use it to build a network. Then use parm_set for the values, and connect
-    for the wires.
+    for the wires. Keep the default names that Houdini gives: leave `name`
+    out, except for the one Output SOP of a network (OUT_<NAME>). A create
+    that breaks a house rule (an Expression SOP, a second Output SOP, a long
+    wrangle) gives `house_rule` in its result.
 
     Do not compute positions: create with input_path, insert and place_chain
     place the nodes the way the user lays out a graph, move a node of the user
@@ -144,9 +147,11 @@ def tool(mode: str = "create",
         "current_network"  — path: what the network editor shows.
         "note"             — parent_path, text, position, color: a sticky
                              note. Without position it goes to the right of
-                             the nodes.
+                             the nodes. Notes go here, never in a node
+                             comment.
         "box"              — paths, text, color: a network box around those
-                             nodes, with text as its comment.
+                             nodes, with text as its title: one to three
+                             words. A longer text is refused.
 
     Returns JSON. Houdini adds a numeric suffix when a name is already used, so
     read the path in the result and use that path from then on. Never look the

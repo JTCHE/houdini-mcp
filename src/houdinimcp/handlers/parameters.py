@@ -299,6 +299,15 @@ def _write(node, parm_name, value, follow_reference=False, check_state=True):
                           f"{target.path()}, or write that parameter by its own path."}
 
     expression = _expression(parm)
+    if parm.isLocked():
+        # Houdini refuses every change to a locked parameter, the removal of
+        # its keys as well, with a PermissionError that names no parameter.
+        return {**report, "applied": False, "locked": True,
+                "reason": f"the parameter is locked"
+                          f"{f' and Houdini derives it with {expression!r}' if expression else ''}"
+                          f", so Houdini refuses a write. "
+                          f"{'Change what the expression reads, or u' if expression else 'U'}"
+                          f"nlock it first with parm_set mode 'lock' and locked=false."}
     keys = parm.keyframes()
     # Houdini counts an expression as one keyframe. A lone expression, such as
     # the $F default of a Time Shift, gives way to the value: left in place it
@@ -406,6 +415,12 @@ def _text(parm):
         return None
 
 
+def _before(parm):
+    """What a script write must compare with: the text and the expression that
+    the parameter held before the write."""
+    return _text(parm), _expression(parm)
+
+
 def _notes(parm, target=None, found=None, before=None):
     """[(kind, sentence)] after a write to `parm` that the write itself cannot
     show: the node it really changed, a state that makes the cook ignore it,
@@ -426,12 +441,13 @@ def _notes(parm, target=None, found=None, before=None):
     return notes
 
 
-def script_write_notes(parm, value, target, before=None):
+def script_write_notes(parm, value, target, before=(None, None)):
     """[(kind, line)] for a parameter that a script wrote in a way that changes
     nothing, or changes something else. Empty for a plain write. `target` is
     the parameter that a channel reference sent the write to, and `before` the
-    text it held, both read before the write."""
+    text and the expression it held (see _before), both read before the write."""
     template = parm.parmTemplate()
+    before, expression_before = before
     notes = _notes(parm, target, None, before)
     bits = _bits(template)
     if bits and isinstance(value, str):
@@ -441,10 +457,22 @@ def script_write_notes(parm, value, target, before=None):
     range_note = _range_note(template, value, parm.eval())
     if range_note:
         notes.append(("clamped", range_note))
-    expression = _expression(parm)
+    if parm.name() == "snippet" and isinstance(value, str):
+        from .vex import size_note
+        rule = size_note(value)
+        if rule:
+            notes.append(("house_rule", rule))
+    # A write at a frame without a key adds a key and keeps the expression
+    # keys: the $F of a Time Shift whose default key is at frame 1001. Then
+    # parm.expression() fails, so look for the old expression in the keys.
+    expression = _expression(parm) or (expression_before if any(
+        key.isExpressionSet() and key.expression() == expression_before
+        for key in parm.keyframes()) else None)
     if expression and not target:
         notes.append(("expression", f"the parameter carries the expression {expression!r}, "
-                                    f"which still decides the value."))
+                                    f"which still decides the value. Call "
+                                    f"deleteAllKeyframes() before set(), or use parm_set, "
+                                    f"which does."))
     return [(kind, f"{parm.path()}: {line}") for kind, line in notes]
 
 

@@ -61,11 +61,13 @@ class _Writes:
         self.creating = 0
         self.created = self.wired = 0
         self.spare_nodes = {}
+        self.commented = []
         self.saved = (hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms,
                       hou.Node.createNode, hou.Node.setInput,
-                      hou.OpNode.setParmTemplateGroup, hou.OpNode.addSpareParmTuple)
+                      hou.OpNode.setParmTemplateGroup, hou.OpNode.addSpareParmTuple,
+                      hou.Node.setComment)
         (parm_set, tuple_set, set_parms, create_node, set_input, set_group,
-         add_spare) = self.saved
+         add_spare, set_comment) = self.saved
         record = self.record
 
         def watched_create_node(node, *rest, **named):
@@ -92,15 +94,20 @@ class _Writes:
                 self.spare_nodes[node.path()] = node
             return add_spare(node, *rest, **named)
 
+        def watched_set_comment(node, *rest, **named):
+            if not self.creating:
+                self.commented.append(node.path())
+            return set_comment(node, *rest, **named)
+
         def watched_parm_set(parm, value, *rest, **named):
-            before = parameters._text(parm)
+            before = parameters._before(parm)
             target = parameters._referenced(parm)
             result = parm_set(parm, value, *rest, **named)
             record(parm, value, target, before)
             return result
 
         def watched_tuple_set(parm_tuple, values, *rest, **named):
-            befores = [parameters._text(parm) for parm in parm_tuple]
+            befores = [parameters._before(parm) for parm in parm_tuple]
             targets = [parameters._referenced(parm) for parm in parm_tuple]
             result = tuple_set(parm_tuple, values, *rest, **named)
             for parm, value, target, before in zip(parm_tuple, values, targets, befores):
@@ -111,7 +118,7 @@ class _Writes:
             parms = {name: node.parm(name) for name in values}
             targets = {name: parm and parameters._referenced(parm)
                        for name, parm in parms.items()}
-            befores = {name: parm and parameters._text(parm) for name, parm in parms.items()}
+            befores = {name: parm and parameters._before(parm) for name, parm in parms.items()}
             result = set_parms(node, values, *rest, **named)
             for name, parm in parms.items():
                 if parm:
@@ -123,6 +130,7 @@ class _Writes:
         hou.Node.createNode, hou.Node.setInput = watched_create_node, watched_set_input
         hou.OpNode.setParmTemplateGroup = watched_set_group
         hou.OpNode.addSpareParmTuple = watched_add_spare
+        hou.Node.setComment = watched_set_comment
         return self
 
     def record(self, parm, value, target, before):
@@ -133,7 +141,7 @@ class _Writes:
     def __exit__(self, *error):
         (hou.Parm.set, hou.ParmTuple.set, hou.OpNode.setParms, hou.Node.createNode,
          hou.Node.setInput, hou.OpNode.setParmTemplateGroup,
-         hou.OpNode.addSpareParmTuple) = self.saved
+         hou.OpNode.addSpareParmTuple, hou.Node.setComment) = self.saved
         return False
 
     def notes(self):
@@ -254,6 +262,11 @@ def execute_code(code, allow_dangerous=True, file=None, globals=None, args=None,
             "note": "The script put these controls at the bottom of the wrangle. They are now "
                     "in the folder above the code, where Create Parameters puts them. Use "
                     "parm_set mode 'spare' next time: it does this itself."}
+    if writes.commented:
+        report["house_rule"] = (f"The script wrote node comments on "
+                                f"{', '.join(writes.commented[:5])}. The user removes them by "
+                                f"hand. Put notes in a sticky note (node_edit mode 'note') "
+                                f"next to the nodes, and clear these comments.")
     if writes.created and writes.wired:
         report["named_tools"] = BUILD_NOTE.format(created=writes.created, wired=writes.wired)
     if stopped:

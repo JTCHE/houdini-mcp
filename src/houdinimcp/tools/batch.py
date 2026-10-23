@@ -47,10 +47,10 @@ def run(operations):
 def _steps(operations, tools, label):
     from . import dispatch
 
-    results = []
+    results, ids = [], {}
     for index, (operation, tool) in enumerate(zip(operations, tools)):
         try:
-            result = dispatch(tool, operation.get("params", {}), label)
+            result = dispatch(tool, _resolved(operation.get("params", {}), ids), label)
             if inspect.isgenerator(result):
                 result = yield from result
         except Exception as error:
@@ -64,7 +64,28 @@ def _steps(operations, tools, label):
                 report["failed_result"] = result  # what else the step did
             return report
         results.append(result)  # in the order of the operations
+        if operation.get("id"):
+            path = next(_paths(result), None)
+            if path is None:
+                return {"count": len(results), "results": results, "stopped_at": index,
+                        "error": f"{tool}: the step has the id '{operation['id']}', and its "
+                                 f"result names no node path for a later step to use."}
+            ids[operation["id"]] = path
     return {"count": len(results), "results": results}
+
+
+def _resolved(value, ids):
+    """The params with each "$id" or "$id/child" put back as the path that
+    the step of that id returned. The bridge checked every id."""
+    if isinstance(value, dict):
+        return {key: _resolved(item, ids) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolved(item, ids) for item in value]
+    if isinstance(value, str) and value.startswith("$"):
+        key, slash, rest = value[1:].partition("/")
+        if key in ids:
+            return ids[key] + slash + rest
+    return value
 
 
 def _failure(result):

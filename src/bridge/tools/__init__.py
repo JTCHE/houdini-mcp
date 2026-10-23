@@ -23,6 +23,8 @@ from pydantic_core import PydanticCustomError
 
 # name -> Tool, filled by build(). batch validates its steps against these.
 TOOLS = {}
+# name -> (the argument that names the mode, the modes), for the same check.
+MODES = {}
 
 
 def build() -> list:
@@ -71,6 +73,7 @@ def _with_modes(name, description, module):
     modes = re.findall(r'"(\w+)"', module.PARAMS.get(key, ""))
     if not modes:
         return description
+    MODES[name] = (key, modes)
     documented = re.findall(r'^\s+"(\w+)"\s*—', description, re.M)
     if set(modes) != set(documented):
         raise RuntimeError(f"{name}: PARAMS['{key}'] names {modes}, the docstring documents "
@@ -120,6 +123,17 @@ def validate(name: str, params: dict) -> None:
     if tool is None:
         raise ToolError(f"There is no tool '{name}'. Tools: {', '.join(TOOLS)}.")
     tool.fn_metadata.validate_arguments(params)
+    # A mode is text to the schema, so a wrong one passes it and fails only
+    # when the step runs: then the whole batch rolls back.
+    key, modes = MODES.get(name, (None, ()))
+    items = params.get("items")
+    for item in [params] + (items if isinstance(items, list) else [items] if items else []):
+        mode = item.get(key) if isinstance(item, dict) else None
+        if mode is not None and mode not in modes:
+            near = difflib.get_close_matches(str(mode), modes, 1, 0.5)
+            raise ToolError(f"{name} has no {key} '{mode}'. "
+                            f"{f'Did you mean {near[0]!r}? ' if near else ''}"
+                            f"Its {key}s: {', '.join(modes)}.")
 
 
 def _guarded(function):

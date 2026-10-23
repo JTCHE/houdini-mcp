@@ -8,6 +8,12 @@ interrupt file of this port (session action='interrupt').
 
 The exception arrives at the next Python step. A single long call into Houdini
 (one cook, one iterPoints on a huge geometry) finishes first.
+
+The loop of the thread makes no object that the garbage collector tracks. Any
+allocation can start a collection on the thread that allocates, and a
+collection can finalize an object that calls `hou` off the main thread, which
+crashed Houdini 20.5 (issue #16). So the interrupt file path is made once per
+call, and the loop reads it with os.access, which makes no stat result.
 """
 import ctypes
 import os
@@ -53,7 +59,8 @@ class watch:
         _remove(protocol.interrupt_file(self.port))
         with _lock:
             _current = {"thread": threading.get_ident(), "command": self.command,
-                        "started": time.monotonic(), "budget": None, "port": self.port,
+                        "started": time.monotonic(), "budget": None,
+                        "interrupt": protocol.interrupt_file(self.port),
                         "reason": None, "fired": None, "handled": False}
         return self
 
@@ -99,8 +106,8 @@ def _watch():
                 continue
             elapsed = time.monotonic() - _current["started"]
             why = None
-            if os.path.exists(protocol.interrupt_file(_current["port"])):
-                _remove(protocol.interrupt_file(_current["port"]))
+            if os.access(_current["interrupt"], os.F_OK):
+                _remove(_current["interrupt"])
                 why = f"the caller interrupted it after {elapsed:.1f} seconds"
             elif _current["budget"] and elapsed > _current["budget"]:
                 why = f"it ran {elapsed:.0f} seconds, past its time budget"

@@ -31,6 +31,8 @@ _hython = None
 # picks, and it refuses to pick when the choice is not obvious.
 _attached_port = None
 _last_session = None
+# Said once in the next result: the bridge changed the session on its own.
+_notice = None
 
 
 class HoudiniError(ToolError):
@@ -191,13 +193,17 @@ def process_is_alive(pid) -> bool:
         return False
     if os.name == "nt":
         import ctypes
-        # SYNCHRONIZE alone: enough to open a live process, and it never asks
-        # for rights that a normal user does not have.
-        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
+        # PROCESS_QUERY_LIMITED_INFORMATION never asks for rights that a normal
+        # user does not have. A process that ended opens as well while another
+        # process holds a handle to it, so read its exit code too.
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return code.value == 259  # STILL_ACTIVE
     try:
         os.kill(int(pid), 0)
         return True
@@ -475,17 +481,38 @@ def connection(auto_start: bool = True) -> Connection:
                 f"The Houdini this session is attached to ({describe(entry)}) runs and "
                 f"does not answer, so it is busy. Wait, then call again. The bridge does "
                 f"not send your command to another session.")
-        raise HoudiniError(
-            f"The Houdini on port {_attached_port}, which this session is attached to, "
-            f"stopped. Call session with action='list' to see the sessions that are "
-            f"there, then action='attach' with the port you want, or action='detach' "
-            f"to let the bridge choose.")
+        return _reattach()
 
     chosen = choose_session(live_sessions())
     if chosen is None and auto_start and not HEADLESS_DISABLED:
         start_headless()  # attaches to the session it started
         return _connection
     _connection.port = chosen["port"] if chosen else None
+    return _connection
+
+
+def _reattach() -> Connection:
+    """The attached Houdini stopped: attach to the one that took its place.
+
+    That is the session with the same scene file, or the only session there
+    is. The next result says so in `_notice`. Any other case is the caller's
+    choice, and the error lists the sessions to choose from.
+    """
+    global _attached_port, _notice
+    old = _attached_port
+    answering = [entry for entry in live_sessions() if entry.get("answers")]
+    hip = (_last_session or {}).get("hip")
+    same = [entry for entry in answering if hip and entry.get("hip") == hip]
+    pick = same if len(same) == 1 else answering if len(answering) == 1 else []
+    if not pick:
+        raise HoudiniError(
+            f"The Houdini on port {old}, which this session is attached to, stopped. "
+            f"Sessions that answer: {'; '.join(map(describe, answering)) or 'none'}. Call "
+            f"session with action='attach' and the port you want, or action='start' "
+            f"for a headless one.")
+    _attached_port = _connection.port = pick[0]["port"]
+    _notice = (f"The Houdini on port {old} stopped, so the bridge attached to "
+               f"{describe(pick[0])}.")
     return _connection
 
 
@@ -623,19 +650,21 @@ def session_line() -> str:
     return (f"Houdini {_last_session.get('version', '?')} "
             f"{'with a window' if _last_session.get('ui') else 'headless'}, "
             f"pid {_last_session.get('pid')}, port {_last_session.get('port')}, "
-            f"file {os.path.basename(_last_session.get('hip') or '') or 'none'}")
+            f"file {os.path.basename(_last_session.get('hip') or '') or 'none'}"
+            f"{', update mode manual: the viewer does not cook' if _last_session.get('update_mode') else ''}")
 
 
 def call_json(command: str, params: Dict[str, Any] = None, timeout: float = 60.0,
               label: str = None) -> str:
     """`call`, as the JSON text that an MCP tool returns, with the session that
     answered and the time it took."""
+    global _notice
     result = call(command, params, timeout, label)
-    if isinstance(result, dict):
-        result = {**result, "_session": session_line(), "_seconds": _last_session["seconds"]}
-    else:
-        result = {"result": result, "_session": session_line(),
-                  "_seconds": _last_session["seconds"]}
+    if not isinstance(result, dict):
+        result = {"result": result}
+    result = {**result, "_session": session_line(), "_seconds": _last_session["seconds"]}
+    if _notice:
+        result["_notice"], _notice = _notice, None
     return json.dumps(result, separators=(",", ":"), default=str)
 
 
