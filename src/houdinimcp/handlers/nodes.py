@@ -527,11 +527,18 @@ def create_box(parent_path, paths, text=None, name=None, color=None):
                          f"'SIM MESH'. {text!r} is longer. Give the box a short title, and "
                          f"put the explanation in a sticky note with mode 'note'.")
     parent = _network(parent_path)
-    box = parent.createNetworkBox(name)
-    for path in paths:
-        item = hou.node(path) or hou.item(path)
+    items = [hou.node(path) or hou.item(path) for path in paths]
+    for path, item in zip(paths, items):
         if item is None:
             raise ValueError(f"Not found: {path}")
+        # A box in a box draws behind its parent, and their nodes overlap.
+        if item.parentNetworkBox() is not None or isinstance(item, hou.NetworkBox):
+            raise ValueError(f"{path} is already in the network box "
+                             f"{(item.parentNetworkBox() or item).name()}. Never put a box "
+                             f"inside a box: put these nodes in one box, or take them out "
+                             f"of the other box first.")
+    box = parent.createNetworkBox(name)
+    for item in items:
         box.addItem(item)
     if text:
         box.setComment(text)

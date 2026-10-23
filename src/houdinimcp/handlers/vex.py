@@ -32,6 +32,13 @@ def size_note(code):
     """The house rule for VEX that a person reads: built-in nodes first, and a
     wrangle only when it is about ten lines or less. None when the code keeps
     to it."""
+    short = sorted(set(re.findall(r"\b(?:float|int|vector|vector2|vector4|string|matrix|"
+                                  r"matrix3|dict)\s+([a-z])\b", code)) |
+                   {f"@{name}" for name in re.findall(r"\b[fiuvps]@([a-z]\d?)\b", code)})
+    if short:
+        return (f"Name each variable and attribute in plain words, in camelCase "
+                f"(outwardSpeed, distanceToShell): {', '.join(short)} says nothing to the "
+                f"person who opens this wrangle.")
     lines = [line for line in code.splitlines()
              if line.strip() and not line.strip().startswith("//")]
     builds = ("addpoint" in code or "addprim" in code) and re.search(
