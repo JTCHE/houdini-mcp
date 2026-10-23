@@ -4,15 +4,15 @@ import hou
 from . import unknown_mode
 from ..handlers import scene
 
-MODES = ("info", "save", "load", "undo", "redo")
+MODES = ("info", "save", "load", "undo", "redo", "merge", "list_file")
 
 
 def MUTATES(params):
     # An undo inside an undo group would undo the group itself.
-    return params.get("mode") in ("save", "load")
+    return params.get("mode") in ("save", "load", "merge")
 
 
-def run(mode="info", path=None, count=1):
+def run(mode="info", path=None, count=1, nodes=None):
     if mode == "info":
         return {**scene.get_scene_info(),
                 "unsaved_changes": hou.hipFile.hasUnsavedChanges()}
@@ -22,6 +22,15 @@ def run(mode="info", path=None, count=1):
         if not path:
             raise ValueError("mode 'load' needs the path of a .hip file.")
         return scene.load_scene(path)
+    if mode == "merge":
+        if not path or not nodes:
+            raise ValueError("mode 'merge' needs path, the .hip file, and nodes, the node "
+                             "paths to bring. Read them with mode 'list_file'.")
+        return scene.merge_file(path, nodes)
+    if mode == "list_file":
+        if not path:
+            raise ValueError("mode 'list_file' needs path, the .hip file.")
+        return scene.list_file(path, nodes)
     if mode in ("undo", "redo"):
         return _step(mode, count)
     raise unknown_mode(mode, MODES)

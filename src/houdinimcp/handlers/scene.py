@@ -76,3 +76,64 @@ def set_frame(frame):
     hou.setFrame(frame)
     # Read back: a frame that did not change must not pass for one that did.
     return {"frame": hou.frame()}
+
+
+# The depth of the node pattern of a merge. hou.hipFile.merge brings a node
+# without its children unless the pattern names them too.
+MERGE_DEPTH = 12
+
+LIST_SCRIPT = r'''
+import json, sys, hou
+hou.hipFile.load(sys.argv[1], suppress_save_prompt=True, ignore_load_warnings=True)
+roots = sys.argv[2:] or [child.path() for child in hou.node("/").children()]
+found = []
+for root in roots:
+    node = hou.node(root)
+    for one in ([node] + list(node.children())) if node else []:
+        found.append({"path": one.path(), "type": one.type().name(),
+                      "children": len(one.children()),
+                      "inputs": [i.path() if i else None for i in one.inputs()]})
+print("MCPLIST" + json.dumps(found))
+'''
+
+
+def list_file(file_path, nodes=None):
+    """The nodes of another .hip file, read by a separate hython, so the
+    session that answers loads nothing. `nodes` are the networks to list;
+    without them, the top networks."""
+    import json
+    import subprocess
+    import sys
+    if not os.path.isfile(file_path):
+        raise ValueError(f"There is no file at {file_path}.")
+    hython = os.path.join(hou.getenv("HFS"), "bin",
+                          "hython.exe" if sys.platform == "win32" else "hython")
+    done = subprocess.run([hython, "-c", LIST_SCRIPT, file_path, *(nodes or ())],
+                          capture_output=True, text=True, timeout=600)
+    marker = next((line for line in done.stdout.splitlines() if line.startswith("MCPLIST")), None)
+    if marker is None:
+        raise ValueError(f"hython could not read {file_path}: {done.stderr[-800:]}")
+    return {"file": file_path, "nodes": json.loads(marker[len("MCPLIST"):])}
+
+
+def merge_file(file_path, nodes):
+    """Merge `nodes` of another .hip file into this session, each with all its
+    children and the wires inside, and report what it made."""
+    if not os.path.isfile(file_path):
+        raise ValueError(f"There is no file at {file_path}.")
+    pattern = " ".join(f"{path.rstrip('/')}{'/*' * depth}"
+                       for path in nodes for depth in range(MERGE_DEPTH))
+    conflicts = [node.path() for node in hou.hipFile.collisionNodesIfMerged(file_path, pattern)]
+    before = {node.path() for node in hou.node("/").allSubChildren()}
+    hou.hipFile.merge(file_path, node_pattern=pattern, ignore_load_warnings=True)
+    made = sorted(node.path() for node in hou.node("/").allSubChildren()
+                  if node.path() not in before)
+    top = [path for path in made if not any(path.startswith(other + "/") for other in made)]
+    report = {"file": file_path, "made": top, "node_count": len(made)}
+    if conflicts:
+        report["renamed"] = (f"These names were in use, so Houdini renamed the merged "
+                             f"nodes: {', '.join(conflicts)}. Use the paths in `made`.")
+    if not made:
+        report["note"] = ("Nothing was merged: no node of the file matches these paths. "
+                          "Read the paths with mode 'list_file'.")
+    return report
