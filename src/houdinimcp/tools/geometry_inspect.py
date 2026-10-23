@@ -11,7 +11,7 @@ MUTATES = False
 MODES = ("summary", "points", "prims", "attrib", "groups", "group_members", "bbox",
          "intrinsics", "nearest", "skeleton", "compare", "try", "volume_stats",
          "volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export",
-         "fingerprint", "stretch", "inside", "crossings")
+         "fingerprint", "stretch", "inside", "crossings", "distance", "changes")
 
 
 def run(path, mode="summary", frames=None, output=None, **options):
@@ -30,6 +30,10 @@ def run(path, mode="summary", frames=None, output=None, **options):
         return measure.fingerprint([path] if isinstance(path, str) else path, frames,
                                    options.get("name"), options.get("against"),
                                    options.get("renamed"))
+    if mode == "changes":
+        # One table over the frames, not one answer for each frame.
+        return _each(path, lambda one: measure.changes(one, frames, options.get("attribs"),
+                                                       options.get("threshold")))
     if isinstance(path, str):
         return _read(path, mode, frames, options)
     results = []
@@ -39,6 +43,12 @@ def run(path, mode="summary", frames=None, output=None, **options):
         except Exception as error:
             results.append({"path": one, "error": f"{type(error).__name__}: {error}"})
     return {"count": len(results), "nodes": results}
+
+
+def _each(path, read):
+    if isinstance(path, str):
+        return read(path)
+    return {"count": len(path), "nodes": [{"path": one, "result": read(one)} for one in path]}
 
 
 def _read(path, mode, frames, options):
@@ -129,6 +139,12 @@ def _one(path, mode, options, frame=None):
         return measure.inside(path, want("against"), want("threshold"))
     if mode == "crossings":
         return measure.crossings(path, want("against"), want("split_by"))
+    if mode == "distance":
+        if not want("against"):
+            raise ValueError("mode 'distance' needs against: the node to measure the "
+                             "distance to.")
+        return measure.distance(path, want("against"), want("threshold"), want("bins"),
+                                want("limit"))
     if mode == "export":
         return geometry.geo_export(path, want("format", "obj"), want("file"), frame)
     raise unknown_mode(mode, MODES)

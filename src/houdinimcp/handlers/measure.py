@@ -242,3 +242,100 @@ def _crossing_points(inputs):
         return points
     keep = [len(set(point.attribValue("sourceinput"))) > 1 for point in found.points()]
     return points[np.array(keep, dtype=bool)]
+
+
+# ---------------------------------------------------------------------------
+# Distance: how far each point is from another geometry.
+
+DISTANCE = "f@__distance = xyzdist(1, @P);"
+
+
+def distance(path, against, threshold=None, bins=None, limit=None):
+    """The distance from each point of `path` to the surface of `against`: the
+    extremes, a histogram, and the points farther than `threshold`."""
+    from .volumes import _bins
+    _, geometry = resolve(path)
+    _, other = resolve(against)
+    result = run_as_node("attribwrangle", {"snippet": DISTANCE}, [geometry, other], "distance")
+    values = np.array(result.pointFloatAttribValues("__distance"))
+    report = {"points": int(values.size), "against": against}
+    if not values.size:
+        return report
+    counts, edges = np.histogram(values, bins=_bins(bins or 10))
+    report.update({"min": round(float(values.min()), 4), "max": round(float(values.max()), 4),
+                   "mean": round(float(values.mean()), 4),
+                   "histogram": {"edges": _round(edges), "counts": counts.tolist()}})
+    if threshold is not None:
+        far = np.flatnonzero(values > threshold)
+        report["farther_than"] = {"distance": threshold, "count": int(far.size),
+                                  "points": far[:limit or 20].tolist(),
+                                  "clusters": _clusters(_positions(result)[far])}
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Changes: what moves, grows or pops over a range of frames.
+
+def changes(path, frames, attribs=None, threshold=None):
+    """For each frame: the counts, the size and the center of the box, and the
+    mean, min and max of each attribute of `attribs`. Then the frames where a
+    number jumps by more than `threshold` (0.2, a ratio) from the frame before:
+    the pops and the hard stops that one frame or a coarse sheet does not show.
+    """
+    wanted = timing.frame_list(frames)
+    if len(wanted) < 2:
+        raise ValueError('mode \'changes\' needs frames: two frames or more, for example '
+                         '{"start": 1001, "end": 1100}.')
+    rows = []
+    with timing.keep_frame():
+        for frame in wanted:
+            hou.setFrame(frame)
+            _, geometry = resolve(path)
+            box = geometry.boundingBox()
+            row = {"frame": frame, "points": len(geometry.points()),
+                   "prims": len(geometry.prims()), "size": _round(box.sizevec()),
+                   "center": _round(box.center())}
+            for name in attribs or ():
+                row[name] = _attribute_numbers(geometry, name)
+            rows.append(row)
+    ratio = 0.2 if threshold is None else threshold
+    jumps = []
+    for before, after in zip(rows, rows[1:]):
+        scale = max(max(before["size"]), max(after["size"]), 1e-6)
+        for key in ["points", "prims", "size", "center"] + list(attribs or ()):
+            old, new = before[key], after[key]
+            if isinstance(old, dict):
+                old, new = old.get("mean"), new.get("mean")
+            if old is None or new is None:
+                continue
+            old, new = np.atleast_1d(old).astype(float), np.atleast_1d(new).astype(float)
+            # A position jumps against the size of the geometry, a count or a
+            # value against itself.
+            base = scale if key == "center" else np.maximum(np.maximum(abs(old), abs(new)), 1e-6)
+            change = float((abs(new - old) / base).max())
+            if change > ratio:
+                jumps.append({"frame": after["frame"], "what": key, "from": before[key],
+                              "to": after[key], "change": round(change, 3)})
+    return {"path": path, "frames": rows, "jumps": jumps, "threshold": ratio,
+            "note": "No jump over the threshold." if not jumps else
+                    f"{len(jumps)} jumps over {ratio:.0%} from one frame to the next."}
+
+
+def _attribute_numbers(geometry, name):
+    """Mean, min and max of a point or prim attribute, by component."""
+    for kind, find, read in (
+            ("point", geometry.findPointAttrib, geometry.pointFloatAttribValues),
+            ("prim", geometry.findPrimAttrib, geometry.primFloatAttribValues)):
+        attribute = find(name)
+        if attribute is None:
+            continue
+        if attribute.dataType() == hou.attribData.Int:
+            read = geometry.pointIntAttribValues if kind == "point" else geometry.primIntAttribValues
+        elif attribute.dataType() != hou.attribData.Float:
+            return {"class": kind, "note": "not a number"}
+        values = np.array(read(name), dtype=float).reshape(-1, attribute.size())
+        if not len(values):
+            return {"class": kind, "mean": None}
+        return {"class": kind, "mean": _round(values.mean(0)), "min": _round(values.min(0)),
+                "max": _round(values.max(0))}
+    return {"mean": None, "note": "no point or prim attribute of this name"}

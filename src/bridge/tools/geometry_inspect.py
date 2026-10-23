@@ -15,10 +15,11 @@ PARAMS = {
     "mode": 'One of "summary", "points", "prims", "attrib", "groups", "group_members", '
             '"bbox", "intrinsics", "nearest", "skeleton", "compare", "try", "volume_stats", '
             '"volume_voxels", "volume_sample", "volume_compare", "image", "volume", "export", '
-            '"fingerprint", "stretch", "inside", "crossings".',
+            '"fingerprint", "stretch", "inside", "crossings", "distance", "changes".',
     "start": "points, prims, attrib: the first element. Page with it.",
     "count": "points, prims: how many elements. Keep it small: a large read is slow.",
-    "attribs": 'points: the attributes to return, for example ["P", "Cd"].',
+    "attribs": 'points: the attributes to return, for example ["P", "Cd"]. changes: the '
+               'attributes whose mean, min and max to follow.',
     "attrib_name": "attrib, try: the attribute to read. try reads it on the result.",
     "attrib_class": 'attrib, try: "point", "prim", "vertex" or "detail".',
     "group_name": "group_members: the group to read.",
@@ -34,7 +35,7 @@ PARAMS = {
               '{"start": 1001, "end": 1010, "step": 2}. One answer for each frame.',
     "unique": "attrib: return each value that occurs and how many elements carry it. That "
               "is how you find the pieces in a geometry.",
-    "against": "compare: the node to compare with. volume_compare: the field whose bands "
+    "against": "compare: the node to compare with. distance: the node to measure to. volume_compare: the field whose bands "
                "hold the field `name`. fingerprint: the name of a saved fingerprint to "
                "compare with. stretch: the rest mesh. inside: the closed mesh. crossings: a "
                "second geometry, such as the body.",
@@ -59,7 +60,8 @@ PARAMS = {
     "threshold": "volume_stats, volume_sample: count the voxels below and above it. "
                  "volume_stats also gives the world box of the voxels above it. stretch: the "
                  "growth to count, 0.1 (10 %) by default. inside: count the points deeper "
-                 "than this distance.",
+                 "than this distance. distance: list the points farther than it. changes: the "
+                 "ratio of change from one frame to the next that counts as a jump (0.2).",
     "renamed": 'fingerprint: {"old path": "new path"} for the nodes that a refactor renamed '
                "or moved.",
     "split_by": 'crossings: a prim attribute, such as "name", whose values are the parts '
@@ -167,6 +169,17 @@ def tool(path: Union[str, List[str]], mode: str = "summary", start: int = 0, cou
                            themselves or `against`, counted for each pair of
                            parts of `split_by`. A part with itself is a self
                            crossing.
+        "distance"       — the distance from each point to the surface of
+                           `against`: min, max, mean, a histogram of `bins`,
+                           and the point numbers farther than `threshold`.
+                           With `frames`, one answer for each frame.
+        "changes"        — cook over `frames` (two or more, step 1 to see
+                           pops) and return a table: counts, box size and
+                           center, and the mean, min and max of `attribs`
+                           for each frame. `jumps` lists the frames where a
+                           number changes by more than `threshold` (0.2)
+                           from the frame before: pops, flicker and hard
+                           stops that one frame does not show.
 
     Returns JSON. A large read is slow: keep `count` small and page with
     `start`.
