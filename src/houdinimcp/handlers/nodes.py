@@ -396,7 +396,6 @@ def layout_children(node_path="/obj", paths=None):
                              "placed by hand. Give `paths` to move only your own nodes."}
         faults = layout.problems(node)
     report.update(_moves(result["moved"]))
-    report["dots"] = result.get("dots")
     if faults:
         report["layout_problems"] = faults
     return report
@@ -490,7 +489,7 @@ def place_chain(paths, reader_path, input_index=0):
         node.setUserData(MADE, "1")
     result = layout.place_chain(chain, reader, input_index)
     report = {"chain": [node.path() for node in chain], "reader": reader.path(),
-              "input": input_index, "dots": result["dots"]}
+              "input": input_index}
     report.update(_moves(result["moved"]))
     faults = layout.problems(reader.parent(), chain + [reader])
     if faults:

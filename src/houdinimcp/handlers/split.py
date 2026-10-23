@@ -140,7 +140,7 @@ def split(network_path, stages):
                 name = f"OUT_{source}" + (f"_{output}" if output else "")
                 out = subnets[here].createNode("null", name)
                 out.setInput(0, feed, output)
-                out.setPosition(feed.position() - hou.Vector2(0, layout.ROW))
+                out.setPosition(feed.position() - hou.Vector2(0, layout.ROW_STEP))
                 outs[key] = out
                 report["out_nulls"].append(out.path())
             feed, output = outs[key], 0
@@ -155,7 +155,7 @@ def split(network_path, stages):
                 {"path": merge.path(), "reads": merge.parm("objpath1").eval()})
         node_at(reader).setInput(index, merges[key])
         if there is None:
-            merges[key].setPosition(node_at(reader).position() + hou.Vector2(0, layout.ROW))
+            merges[key].setPosition(node_at(reader).position() + hou.Vector2(0, layout.ROW_STEP))
 
     for name, parm, raw in references:
         holder = node_at(name)

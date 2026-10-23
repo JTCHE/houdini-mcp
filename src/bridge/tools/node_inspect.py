@@ -81,8 +81,12 @@ def tool(paths: Union[str, List[str]], mode: str = "info", parm: str = None,
                             input geometry does not hold. That is the failure
                             that gives a wrong result with no error.
         "layout"          — for a network: each node that sits above its input,
-                            and each pair of nodes in one slot, where one name
-                            covers the other. Read it after you add nodes.
+                            each pair of nodes where one name covers the
+                            other, wires behind nodes, and the house rules:
+                            node comments, box titles that are sentences or
+                            cut off, a box in a box, a node in a box it is not
+                            part of, a Null OUT_ display node with no Output.
+                            Read it after you add nodes.
         "readers"         — the parameters that read `parm` through a channel
                             reference or an expression: what else a write to
                             it changes.

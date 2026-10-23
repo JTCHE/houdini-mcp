@@ -108,11 +108,11 @@ def tool(mode: str = "create",
         "flags"            — path, display, render, bypass. The display flag
                              and the render flag are different flags.
         "color"            — path, color as [r, g, b] from 0 to 1.
-        "layout"           — path: lay out the children of that network:
-                             each node under its first input (a straight
-                             wire), side inputs from the right in port order,
-                             a source one row above its reader, long wires down
-                             a lane through dots. Give `paths` to lay out only
+        "layout"           — path: lay out the children of that network
+                             with the user's Smart Layout shelf tool (the same
+                             code): one row per input depth, each node under
+                             its first input, other inputs in the columns to
+                             the right. Give `paths` to lay out only
                              those nodes. Without it the whole network moves,
                              including the nodes the user placed by hand, and
                              the result says so.
