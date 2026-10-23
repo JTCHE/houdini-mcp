@@ -19,6 +19,8 @@ PARAMS = {
                    "its own range.",
     "res_scale": "start: a fraction of the resolution for this render only, 0.5 is half.",
     "wait": "start: return when every image is complete, with its render stats.",
+    "background": "start: render the saved .hip file in a separate hython, so Houdini "
+                  "stays free. The scene must have no unsaved changes.",
     "reference": "compare: the image to compare `output_path` with.",
     "render_type": 'create: the ROP kind, for example "opengl", "karma", "mantra" or "ifd".',
     "name": "create: the name of the new ROP.",
@@ -33,7 +35,7 @@ PROCESS_NAMES = ("husk", "mantra-bin")
 def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
          render_type: str = "opengl", name: str = None, parent_path: str = "/out",
          output_path: str = None, res_scale: float = None, wait: bool = False,
-         reference: str = None) -> str:
+         reference: str = None, background: bool = False) -> str:
     """Start a render, read its settings, or watch it run.
 
     Use it for a final picture through a ROP node. For a fast look at the
@@ -47,7 +49,11 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
                      renders. `wait=true` returns when every image is
                      complete (husk ended; up to about 28 minutes), with the
                      render stats of the last one. Without wait, husk can go
-                     on after the call.
+                     on after the call. `background=true` renders the saved
+                     .hip file in a separate hython and returns at once with
+                     its pid and log: the session stays free for the user
+                     and for other calls while the stage cooks and husk
+                     renders. Follow it with "watch".
         "progress" — what the ROP reports about the render.
         "settings" — the output file, the camera, the resolution and the
                      range of the ROP; the render delegate that really runs
@@ -85,7 +91,8 @@ def tool(mode: str = "start", path: str = None, frame_range: List[float] = None,
                                 "render_type": render_type, "name": name,
                                 "parent_path": parent_path, "output_path": output_path,
                                 "res_scale": res_scale, "wait": wait,
-                                "reference": reference}, timeout=1800.0)
+                                "reference": reference, "background": background},
+                     timeout=1800.0)
 
 
 def _watch(output_path):

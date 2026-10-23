@@ -2,10 +2,13 @@
 
 import json
 import os
+import subprocess
+import sys
 import time
 
 import hou
 
+from .. import protocol
 from . import karma, parameters
 
 
@@ -178,7 +181,7 @@ _gl_rendered = False
 
 # The parameter that names the image, by ROP type: USD Render, Karma and
 # OpenGL, Mantra, Composite.
-OUTPUT_PARMS = ("outputimage", "picture", "vm_picture", "copoutput")
+OUTPUT_PARMS = ("outputimage", "picture", "vm_picture", "copoutput", "sopoutput", "lopoutput")
 # How long a call waits for the images. The bridge gives up at 1800 s.
 WAIT_LIMIT = 1700.0
 
@@ -295,6 +298,62 @@ def start_render(path, frame_range=None, output_path=None, res_scale=None, wait=
         raise ValueError(f"wait needs the image file, and {node.path()} names none. Give "
                          f"output_path.")
     return _waited(report, files, started)
+
+
+# A separate hython runs this: it opens the saved scene and renders the ROP
+# with the same overrides as a render in the session.
+BACKGROUND = r'''
+import json, sys, hou
+args = json.loads(sys.argv[1])
+sys.path.insert(0, args["plugin"])
+hou.hipFile.load(args["hip"], suppress_save_prompt=True, ignore_load_warnings=True)
+from houdinimcp.handlers import rendering
+print(json.dumps(rendering.start_render(args["path"], args["frame_range"], args["output_path"],
+                                        args["res_scale"]), default=str), flush=True)
+print("MCP: render done", flush=True)
+'''
+
+
+def start_background(path, frame_range=None, output_path=None, res_scale=None):
+    """Render the ROP in a separate hython that opens the saved .hip file, so
+    this session stays free while the stage cooks and husk renders."""
+    node = hou.node(path)
+    if not node:
+        raise ValueError(f"Node not found: {path}")
+    if not hou.isUIAvailable():
+        # hython reports unsaved changes after every save, and it has no
+        # window to keep free.
+        raise ValueError("background=true is for a Houdini with a window. Render in this "
+                         "session: drop background.")
+    hip = hou.hipFile.path()
+    if hou.hipFile.hasUnsavedChanges() or not os.path.isfile(hip):
+        raise ValueError("A background render opens the .hip file on disk, and this session "
+                         "has changes that are not in it. Save first (scene_file mode "
+                         "'save', when the user agrees), or render in the session.")
+    hython = os.path.join(hou.getenv("HFS"), "bin",
+                          "hython.exe" if sys.platform == "win32" else "hython")
+    folder = os.path.join(protocol.data_dir(), "renders")
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, f"{node.name()}_{time.strftime('%Y%m%d_%H%M%S')}.log")
+    plugin = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    args = {"hip": hip, "plugin": plugin, "path": path, "frame_range": frame_range,
+            "output_path": output_path, "res_scale": res_scale}
+    detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+              if sys.platform == "win32" else {"start_new_session": True})
+    with open(log, "w") as handle:
+        process = subprocess.Popen([hython, "-c", BACKGROUND, json.dumps(args)],
+                                   stdout=handle, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL, **detach)
+    frames = _frames(node, frame_range)
+    output = _output_parm(node)
+    files = ([output_path.replace("$F4", f"{int(frame):04d}") for frame in frames] if output_path
+             else [output.evalAtFrame(frame) for frame in frames] if output else [])
+    return {"path": path, "background": True, "pid": process.pid, "log": log,
+            "frames": [frames[0], frames[-1]],
+            "files": files[:3] + ([f"... {len(files) - 3} more"] if len(files) > 3 else []),
+            "note": "A separate hython renders the saved scene; this session stays free. "
+                    "The log ends with 'MCP: render done'. Follow the images with render "
+                    "mode 'watch' and output_path."}
 
 
 def _waited(report, files, started):

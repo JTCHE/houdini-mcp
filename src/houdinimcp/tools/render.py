@@ -8,7 +8,10 @@ MODES = ("start", "progress", "settings", "create", "stats", "compare")
 
 
 def run(path=None, mode="start", frame_range=None, render_type="opengl", name=None,
-        parent_path="/out", output_path=None, res_scale=None, wait=False, reference=None):
+        parent_path="/out", output_path=None, res_scale=None, wait=False, reference=None,
+        background=False):
+    if mode == "start" and background:
+        return rendering.start_background(path, frame_range, output_path, res_scale)
     if mode == "start":
         return rendering.start_render(path, frame_range, output_path, res_scale, wait)
     if mode == "progress":
