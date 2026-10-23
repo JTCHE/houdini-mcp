@@ -60,6 +60,9 @@ def tool(path: str, mode: str = "stage", prim_path: str = None, pattern: str = N
                         and scale composed through every parent. With
                         `frames`, the path of a moving prim.
 
+    A layer file that another process wrote again (a cache from hython) is
+    reloaded before the read, and `reloaded_layers` names it.
+
     Returns JSON.
     """
     return call_json("stage_inspect", {

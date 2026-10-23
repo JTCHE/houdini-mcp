@@ -1,4 +1,6 @@
 """The USD stage of a LOP node: prims, layers, attributes, composition."""
+import hou
+
 from . import unknown_mode
 from ..handlers import lop, timing
 
@@ -13,10 +15,17 @@ def run(path, mode="stage", prim_path=None, pattern=None, type_name=None,
         include_attrs=False, frames=None):
     arguments = (path, mode, prim_path, pattern, type_name, attr_name, root_prim,
                  max_depth, layer_index, count, include_attrs)
+    reloaded = lop.reload_changed_layers()
+    if reloaded and hou.node(path):
+        hou.node(path).cook(force=True)
     if frames is not None:
         # The same read at each frame, with the playbar put back after.
-        return timing.at_frames(frames, lambda: _one(*arguments))
-    return _one(*arguments)
+        result = timing.at_frames(frames, lambda: _one(*arguments))
+    else:
+        result = _one(*arguments)
+    if reloaded and isinstance(result, dict):
+        result["reloaded_layers"] = reloaded
+    return result
 
 
 def _one(path, mode, prim_path, pattern, type_name, attr_name, root_prim, max_depth,

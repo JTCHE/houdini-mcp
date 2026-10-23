@@ -2,6 +2,27 @@
 import hou
 
 
+def reload_changed_layers():
+    """Reload each USD layer whose file changed on disk since it was loaded.
+
+    The layer registry keeps a loaded file in memory, so a cache that another
+    process wrote again reads as the old file, with no warning. Reload() does
+    nothing for a file that did not change, and it skips a layer with edits
+    that are not saved. Returns the files that were reloaded.
+    """
+    from pxr import Sdf
+    reloaded = []
+    for layer in Sdf.Layer.GetLoadedLayers():
+        if layer.anonymous or layer.dirty or not layer.realPath:
+            continue
+        try:
+            if layer.Reload():
+                reloaded.append(layer.realPath)
+        except Exception:
+            continue  # a file that went away keeps its layer; the read says so
+    return reloaded
+
+
 def lop_stage_info(path):
     """Get USD stage info from a LOP node: prims, layers, time codes."""
     node = hou.node(path)

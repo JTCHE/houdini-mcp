@@ -127,17 +127,26 @@ def state(parm, values=None):
         except hou.OperationFailed:
             shown = False
         holds, group = _rule_holds(parm.node(), rule, values) if rule else (False, None)
-        if shown or holds:
+        # A GUI updates isDisabled and isHidden when its event loop runs, so
+        # after a write in the same call they can be stale. A rule this
+        # reader decides is read from the values that are there now.
+        if holds if rule and holds is not None else shown:
             found[key] = group or rule or "the node state"
         elif holds is None:
             found[f"{key}_when"] = rule
+    toggle = parm.node().parm(f"enable_{parm.tuple().name()}")
+    if "disabled" not in found and toggle is not None and toggle != parm and not toggle.eval():
+        found["disabled"] = f"{{ {toggle.name()} == 0 }}"
     if template.isHidden():
-        found["hidden"] = "the parameter template, always"
+        found["hidden"] = TEMPLATE_HIDDEN
     if "hidden" not in found:
         reason = karma.ignored(parm, (values or {}).get("engine"))
         if reason:
             found["ignored"] = reason
     return found
+
+
+TEMPLATE_HIDDEN = "the parameter template, always"
 
 
 def inert(parm):
@@ -152,7 +161,11 @@ def _state_warnings(found):
     if "disabled" in found:
         lines.append(f"the parameter is disabled while {found['disabled']} holds, so the "
                      f"cook does not read the value. Change that condition first.")
-    if "hidden" in found:
+    if found.get("hidden") == TEMPLATE_HIDDEN:
+        lines.append("the parameter is hidden in its template, so the user cannot see it. "
+                     "A node can still read such a parameter (lookatpath of an object "
+                     "does): check the result.")
+    elif "hidden" in found:
         lines.append(f"the parameter is hidden while {found['hidden']} holds: the user "
                      f"cannot see it, and in this mode the node most likely does not "
                      f"read it.")
@@ -496,6 +509,11 @@ def _expansion_warning(parm, template, before=None):
     except hou.OperationFailed:
         return None
     if written == used or written == before:
+        return None
+    # A plain string parameter can hold an output path too, such as
+    # productName on a Render Product LOP: a frame or scene token, and a
+    # file extension at the end.
+    if re.search(r"\$(F\d*|HIP|JOB|OS)\b", written) and re.search(r"\.\w{2,5}$", written):
         return None
     return (f"Houdini expanded variables in this text, so the value that the node uses is "
             f"not the value that was written. Written: {written!r}. Used: {used!r}. "

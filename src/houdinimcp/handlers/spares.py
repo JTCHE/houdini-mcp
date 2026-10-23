@@ -136,7 +136,15 @@ def add_spare_parameters(node_path, specs):
         else:
             group.append(template)
             made.append(spec["name"])
-    node.setParmTemplateGroup(group)
+    try:
+        node.setParmTemplateGroup(group)
+    except hou.OperationFailed as error:
+        # Some node types cannot rebuild their own parameters, and Houdini then
+        # names a parameter of the type that the caller never touched.
+        raise ValueError(
+            f"{node.type().name()} nodes do not take spare parameters: Houdini cannot "
+            f"rebuild their parameter list ({error}). Put the control on a Null that "
+            f"holds the controls, such as /obj/CTRL, and read it here with ch().") from error
     for spec in specs:
         _set(node, spec)
 

@@ -2,7 +2,7 @@
 import hou
 
 from . import as_list, unknown_mode
-from ..handlers import cache, dops, timing
+from ..handlers import cache, dops, lop, timing
 from ..handlers.geometry import failure
 
 MUTATES = True
@@ -12,6 +12,17 @@ MODES = ("cook", "cache_write", "cache_clear", "sim_step", "sim_reset", "recook"
 
 def run(paths, mode="cook", frame_range=None, frames=None, num_steps=1,
         parameters=None, force=True):
+    result = _run(paths, mode, frame_range, frames, num_steps, parameters, force)
+    # A file cache that another process wrote again reads as the old file
+    # until its layer reloads. The cook writes it again, so reload after.
+    if any(isinstance(node, hou.LopNode) for node in map(hou.node, as_list(paths))):
+        reloaded = lop.reload_changed_layers()
+        if reloaded and isinstance(result, dict):
+            result["reloaded_layers"] = reloaded
+    return result
+
+
+def _run(paths, mode, frame_range, frames, num_steps, parameters, force):
     if mode == "cook":
         # frame_range is [start, end] and means every frame between the two.
         # frames is a list, a number, or {"start": …, "end": …, "step": …}.
