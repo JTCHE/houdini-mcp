@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.JTCHE/houdini-mcp -->
 
-<img src="https://raw.githubusercontent.com/JTCHE/houdini-mcp/main/public/cover.png" alt="An illustration titled &quot;Houdini MCP&quot;, showing three agent platforms linked to the NodebookMD icon" />
+<img src="https://raw.githubusercontent.com/JTCHE/houdini-mcp/refs/heads/main/public/cover.png" alt="An illustration titled &quot;Houdini MCP&quot;, showing three agent platforms linked to the NodebookMD icon" />
 
 
   <a href="https://pypi.org/project/houdini-mcp-server/"><img src="https://img.shields.io/pypi/v/houdini-mcp-server?color=blue" alt="PyPI Version"/></a>
