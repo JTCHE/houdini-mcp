@@ -4,13 +4,14 @@
 
 <img src="https://raw.githubusercontent.com/JTCHE/houdini-mcp/refs/heads/main/public/cover.png" alt="An illustration titled &quot;Houdini MCP&quot;, showing three agent platforms linked to the NodebookMD icon" />
 
-
+<p align="center">
   <a href="https://pypi.org/project/houdini-mcp-server/"><img src="https://img.shields.io/pypi/v/houdini-mcp-server?color=blue" alt="PyPI Version"/></a>
   <a href="https://github.com/JTCHE/houdini-mcp/blob/main/LICENSE"><img src="https://img.shields.io/github/license/JTCHE/houdini-mcp?color=blue" alt="License: MIT"/></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white" alt="Python 3.10+"/></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-compatible-green" alt="MCP Compatible"/></a>
   <a href="https://www.sidefx.com/"><img src="https://img.shields.io/badge/Houdini-20.5%20%7C%2021.0%20%7C%2022.0-orange" alt="Houdini 20.5, 21.0 and 22.0"/></a>
-
+  <a href="https://glama.ai/mcp/servers/JTCHE/houdini-mcp"><img src="https://glama.ai/mcp/servers/JTCHE/houdini-mcp/badges/score.svg" alt="HoudiniMCP MCP server – quality and maintenance score on Glama"></a>
+</p>
 
 Connect SideFX Houdini to Claude, Codex, Gemini, Cursor, opencode or pi.
 
@@ -57,15 +58,15 @@ The plugin starts a headless Houdini without setup. To connect the Houdini that 
 
 ## Tools
 
-| | |
-|---|---|
-| **Read** | `scene_overview` `node_inspect` `geometry_inspect` `stage_inspect` `select` `console` |
-| **Edit** | `node_edit` `parm_set` `connect` `hda` `batch` |
-| **Run** | `cook` `render` `pdg` `playbar` `scene_file` |
-| **See** | `capture`: the viewport, a camera, four views or a flipbook |
-| **Code** | `execute`: Python, HScript, expressions, VEX check |
-| **Docs** | `docs`: the Houdini documentation of your build, offline, from [houdinimd-docs](https://pypi.org/project/houdinimd-docs/) |
-| **Session** | `session`: status; starts Houdini headless or with its window |
+|             |                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Read**    | `scene_overview` `node_inspect` `geometry_inspect` `stage_inspect` `select` `console`                                     |
+| **Edit**    | `node_edit` `parm_set` `connect` `hda` `batch`                                                                            |
+| **Run**     | `cook` `render` `pdg` `playbar` `scene_file`                                                                              |
+| **See**     | `capture`: the viewport, a camera, four views or a flipbook                                                               |
+| **Code**    | `execute`: Python, HScript, expressions, VEX check                                                                        |
+| **Docs**    | `docs`: the Houdini documentation of your build, offline, from [houdinimd-docs](https://pypi.org/project/houdinimd-docs/) |
+| **Session** | `session`: status; starts Houdini headless or with its window                                                             |
 
 No Houdini open? The server starts a headless `hython`.
 
@@ -78,13 +79,13 @@ point and primitive counts, and the nodes with errors.
 <details>
 <summary><b>Troubleshooting</b></summary>
 
-| Problem | Fix |
-|---|---|
-| No Houdini listens for the bridge | Start Houdini, or click **Toggle MCP Server** on the HoudiniMCP shelf. |
-| No HoudiniMCP shelf | Restart Houdini. `houdinimcp-install --list` shows where the plugin went. |
-| Houdini started from Git Bash has no plugin | Git Bash sets `HOME`. Set the user variable `HOUDINI_USER_PREF_DIR` to `%USERPROFILE%\Documents\houdini__HVER__`. |
-| `capture` says there is no viewport | The session is headless. Call `session` with `action="start_gui"`. |
-| You must have a fixed port | Set `HOUDINIMCP_PORT` for Houdini and for the bridge. Without it, the plugin takes a free port from the operating system and tells the bridge which one. |
+| Problem                                     | Fix                                                                                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No Houdini listens for the bridge           | Start Houdini, or click **Toggle MCP Server** on the HoudiniMCP shelf.                                                                                   |
+| No HoudiniMCP shelf                         | Restart Houdini. `houdinimcp-install --list` shows where the plugin went.                                                                                |
+| Houdini started from Git Bash has no plugin | Git Bash sets `HOME`. Set the user variable `HOUDINI_USER_PREF_DIR` to `%USERPROFILE%\Documents\houdini__HVER__`.                                        |
+| `capture` says there is no viewport         | The session is headless. Call `session` with `action="start_gui"`.                                                                                       |
+| You must have a fixed port                  | Set `HOUDINIMCP_PORT` for Houdini and for the bridge. Without it, the plugin takes a free port from the operating system and tells the bridge which one. |
 
 </details>
 
