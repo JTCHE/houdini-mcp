@@ -15,6 +15,10 @@ echo.
 echo === HoudiniMCP bootstrap ===
 echo.
 
+REM Houdini sets PYTHONHOME and PYTHONPATH. They break every other Python process.
+set "PYTHONHOME="
+set "PYTHONPATH="
+
 where uv >nul 2>&1
 if errorlevel 1 (
     echo [..]   Installing uv...

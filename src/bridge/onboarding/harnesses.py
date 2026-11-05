@@ -240,25 +240,26 @@ def _opencode_detect() -> bool:
 
 
 def _opencode_config() -> str:
-    # The global config has three accepted names. Use the one that exists.
-    names = ("opencode.json", "opencode.jsonc", "config.json")
+    # Use the file that exists. Write opencode.json when there is none.
+    names = ("opencode.json", "opencode.jsonc")
     return next((os.path.join(_opencode_dir(), name) for name in names
                  if os.path.isfile(os.path.join(_opencode_dir(), name))),
                 os.path.join(_opencode_dir(), names[0]))
 
 
-def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
-    path = _opencode_config()
-    config = {}
-    if os.path.isfile(path):
+def _opencode_read(path: str) -> dict:
+    """The opencode config. An empty dict when the file does not exist."""
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
         try:
-            with open(path, encoding="utf-8") as handle:
-                config = json.load(handle)
+            return json.load(handle)
         except json.JSONDecodeError as error:
-            raise RuntimeError(f"{path} is not plain JSON ({error}). Add the server by hand: "
-                               f"mcp.{SERVER_NAME} = {_opencode_server(repo_dir)}")
-    config.setdefault("$schema", "https://opencode.ai/config.json")
-    config.setdefault("mcp", {})[SERVER_NAME] = _opencode_server(repo_dir)
+            raise RuntimeError(f"{path} is not plain JSON ({error}). Add the server by hand "
+                               f"to mcp.servers.{SERVER_NAME}.")
+
+
+def _opencode_write(path: str, config: dict, dry_run: bool) -> str:
     if not dry_run:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
@@ -267,9 +268,33 @@ def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
     return path
 
 
+def _opencode_configure(repo_dir: str, dry_run: bool) -> str:
+    path = _opencode_config()
+    config = _opencode_read(path)
+    config.setdefault("$schema", "https://opencode.ai/config.json")
+    # V2 keeps every server in the "servers" table. A server name directly
+    # under "mcp" is not read.
+    config.setdefault("mcp", {}).setdefault("servers", {})[SERVER_NAME] = \
+        _opencode_server(repo_dir)
+    return _opencode_write(path, config, dry_run)
+
+
+def _opencode_remove(dry_run: bool) -> str:
+    path = _opencode_config()
+    if not os.path.isfile(path):
+        return None
+    config = _opencode_read(path)
+    servers = (config.get("mcp") or {}).get("servers") or {}
+    if SERVER_NAME not in servers:
+        return None
+    del servers[SERVER_NAME]
+    return _opencode_write(path, config, dry_run)
+
+
 def _opencode_server(repo_dir: str) -> dict:
     command = server_command(repo_dir)
-    return {"type": "local", "command": [command["command"], *command["args"]], "enabled": True}
+    # V2 connects a server unless "disabled" is true.
+    return {"type": "local", "command": [command["command"], *command["args"]]}
 
 
 # ── pi ──
@@ -311,8 +336,7 @@ HARNESSES = [
             lambda dry_run: _drop_json_server(_home(".gemini", "settings.json"), dry_run)),
     Harness("cursor", "Cursor", _cursor_detect, _cursor_configure,
             lambda dry_run: _drop_json_server(_home(".cursor", "mcp.json"), dry_run)),
-    Harness("opencode", "opencode", _opencode_detect, _opencode_configure,
-            lambda dry_run: _drop_json_server(_opencode_config(), dry_run, key="mcp")),
+    Harness("opencode", "opencode", _opencode_detect, _opencode_configure, _opencode_remove),
     Harness("pi", "pi", _pi_detect, _pi_configure,
             lambda dry_run: _drop_json_server(os.path.join(_pi_dir(), "mcp.json"), dry_run)),
 ]
