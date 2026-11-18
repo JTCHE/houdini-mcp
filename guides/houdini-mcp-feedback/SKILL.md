@@ -1,6 +1,6 @@
 ---
 name: houdini-mcp-feedback
-description: End-of-session review of the Houdini MCP tools, filed as specs in the Obsidian vault. Run it when the user says "feedback", "how did that feel", "survey", "houdini-mcp-feedback", or asks whether the MCP tools felt efficient or if anything was missing.
+description: End-of-session review of the Houdini MCP tools, filed through the feedback tool. Run it when the user says "feedback", "how did that feel", "survey", "houdini-mcp-feedback", or asks whether the MCP tools felt efficient or if anything was missing.
 ---
 
 # Houdini MCP feedback
@@ -49,50 +49,21 @@ Lead each point with the concrete finding. No throat-clearing.
 
 ## 2. File what you found
 
-Read the vault path from `.env.obsidian` in the repository root, the line
-`OBSIDIAN_VAULT_PATH = <path>`. That file is not in git, and the path must
-never go into a file that is.
+Call the `feedback` tool once for each finding. Its arguments are the fields
+of the spec: title, kind, area, priority, tool_name, happened, expected,
+proposed_fix. `priority` is `P1` for a wrong result without an error, `P2` for
+a thing that costs round trips, `P3` for polish.
 
-The specs live in `<vault>/side projects/Houdini/HoudiniMCP/`, one `.md` file
-for each, next to `HoudiniMCP — Fork.base`, which is the view of them.
+Before you call it, read the open specs in the folder that the tool reports,
+or the open issues. When a spec already covers the finding, append one dated
+line to that spec and do not call the tool. Never change `Status` yourself.
 
-**With no vault path, or no such folder:** print the survey in the chat and
-write nothing. Say that the vault path is missing.
+Write each field in ASD-STE100 Simplified Technical English for a person who
+did not see this session. Name the tool, the file and the function if you know
+them. Do not ask for a new tool when a mode or an argument on a tool that
+exists would do.
 
-**With the folder:**
-
-1. Read the file names and the frontmatter of the specs that are there. A spec
-   with `Status: Open` is live work.
-2. For each finding, decide: does an open spec already cover it?
-   - **Yes** — append one line to that spec: the date, and what this session
-     adds. Do not rewrite the paragraph that is there.
-   - **No** — write a new spec.
-3. Never change `Status` yourself. Only the user closes a spec.
-
-A new spec is one file, named as a short sentence that says the problem, for
-example `Parameter Writes Report Success They Did Not Achieve.md`:
-
-```markdown
----
-Type: Issue
-Area: Bridge
-Status: Open
-Priority: P2
----
-One paragraph. What happens, where, and what the tool must do instead. Name the
-file and the function. Write it in ASD-STE100 Simplified Technical English, in
-normal prose, for a person who did not see this session.
-```
-
-`Type` is `Issue` or `Feature`. `Area` is `Bridge`, `Plugin`, `Docs`,
-`Onboarding` or `Tools`. `Priority` is `P1` for a thing that gives a wrong
-result without an error, `P2` for a thing that costs round trips, `P3` for
-polish.
-
-Write the spec for the person who implements it. Say which tool, which file if
-you know it, what happens now, and what must happen instead. Do not ask for a
-new tool when a mode or an argument on a tool that exists would do: say which
-tool and which argument. Do not ask for anything that only your pipeline needs.
+When the tool returns a link, give the link to the user.
 
 Then tell the user, in the chat, which specs you appended to and which you
 made.

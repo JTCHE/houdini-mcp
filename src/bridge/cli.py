@@ -35,6 +35,7 @@ The tools
   pdg              TOP networks and their work items
   batch            several calls in one round trip, all or nothing
   execute          run code in the session. Last resort.
+  feedback         report a tool that failed you, or a tool that is missing
 
 The loop: read the node page with docs, build with one batch, read its `check`
 (the cooked counts and the nodes with errors), then look with capture. A failed
